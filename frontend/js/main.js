@@ -11,13 +11,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const header = document.querySelector('.landing-header');
             if (header) {
                 header.innerHTML = `
-                    <div style="display: flex; align-items: center; gap: 1rem;">
-                        <a href="/player" class="google-signin-btn" style="background: var(--accent-purple); color: #0a0a0f; border-color: var(--accent-purple);">
-                            Go to Player
-                        </a>
+                    <div style="display: flex; align-items: center; gap: 1.5rem;">
                         <a href="/history" class="nav-link">History</a>
                         <img src="${user.avatar_url || 'https://www.gravatar.com/avatar?d=mp'}" class="user-avatar" alt="Avatar">
                     </div>
+                `;
+            }
+            const loginContainer = document.getElementById('login-container');
+            if (loginContainer) {
+                loginContainer.innerHTML = `
+                    <a href="/player" class="google-signin-btn small-btn" style="background: var(--accent-purple); color: #0a0a0f; border-color: var(--accent-purple);">
+                        Go to Player
+                    </a>
                 `;
             }
         })
