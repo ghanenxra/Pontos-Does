@@ -51,7 +51,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 'playbackRateMenuButton',
                 'subsCapsButton',
                 'audioTrackButton',
-                'pictureInPictureToggle',
                 'fullscreenToggle'
             ]
         }
@@ -95,15 +94,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         buildCSSClass() {
-            return 'vjs-icon-cog ' + super.buildCSSClass();
+            return `vjs-quality-button ${super.buildCSSClass()}`;
         }
     }
 
     videojs.registerComponent('QualityButton', QualityButton);
     player.ready(function() {
-        // Insert Quality Button before PictureInPicture
-        const pipIndex = player.controlBar.children_.findIndex(c => c.name_ === 'PictureInPictureToggle') || player.controlBar.children_.length - 2;
-        player.controlBar.addChild('QualityButton', {}, pipIndex > 0 ? pipIndex : player.controlBar.children_.length - 2);
+        // Insert Quality Button before Fullscreen
+        const fsIndex = player.controlBar.children_.findIndex(c => c.name_ === 'FullscreenToggle') || player.controlBar.children_.length - 1;
+        player.controlBar.addChild('QualityButton', {}, fsIndex > 0 ? fsIndex : player.controlBar.children_.length - 1);
         
         // Add VLC-style keyboard shortcuts
         if (this.hotkeys) {
