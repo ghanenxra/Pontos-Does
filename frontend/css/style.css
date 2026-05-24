@@ -437,9 +437,7 @@ body {
 .video-wrapper {
     width: 100%;
     max-width: 1000px;
-    aspect-ratio: 16/9;
     border-radius: 12px;
-    overflow: hidden;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
     background: #000;
     position: relative;
@@ -462,6 +460,8 @@ body {
     font-family: var(--font-body);
     width: 100%;
     height: 100%;
+    border-radius: 12px;
+    overflow: hidden;
 }
 
 .video-js.vjs-custom-skin .vjs-big-play-button {

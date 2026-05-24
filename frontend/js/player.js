@@ -88,8 +88,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     videojs.registerComponent('QualityButton', QualityButton);
-    player.ready(() => {
+    player.ready(function() {
         player.controlBar.addChild('QualityButton', {}, player.controlBar.children_.length - 2);
+        
+        // Add VLC-style keyboard shortcuts (Space to toggle play, F for fullscreen, M for mute, Arrows for seek)
+        if (this.hotkeys) {
+            this.hotkeys({
+                volumeStep: 0.1,
+                seekStep: 5,
+                enableModifiersForNumbers: false
+            });
+        }
     });
 
     player.on('qualitySelected', (e, quality) => {
@@ -167,10 +176,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openGooglePicker(oauthToken) {
-        // Allow picking folders AND specific video files
+        // Allow picking folders AND specific video files. We don't restrict mimeTypes 
+        // because Google Drive sometimes categorizes MKVs as application/octet-stream or video/*
         const docsView = new google.picker.DocsView()
-            .setIncludeFolders(true)
-            .setMimeTypes('application/vnd.google-apps.folder,video/mp4,video/x-matroska,video/webm,video/quicktime');
+            .setIncludeFolders(true);
 
         const picker = new google.picker.PickerBuilder()
             .addView(docsView)
@@ -351,6 +360,12 @@ document.addEventListener('DOMContentLoaded', () => {
         let srcUrl = '';
         let type = mimeType || 'video/mp4'; // Use provided mimeType or fallback
 
+        // If it's Matroska or Octet-stream, omitting the type lets Video.js fall back to the native 
+        // HTML5 video tag's sniffing capabilities which can often play MKVs in Chrome.
+        if (type === 'video/x-matroska' || type === 'application/octet-stream') {
+            type = undefined;
+        }
+
         if (sourceType === 'gdrive') {
             srcUrl = `/api/stream?source=gdrive&fileId=${sourceId}`;
         } else if (sourceType === 'terabox') {
@@ -361,10 +376,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Set source and reload player engine
-        player.src({
-            src: srcUrl,
-            type: type
-        });
+        const srcObj = { src: srcUrl };
+        if (type) srcObj.type = type;
+
+        player.src(srcObj);
         player.load();
 
         // Clear and reload subtitles (GDrive folder search)
