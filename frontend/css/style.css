@@ -592,7 +592,7 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 8px 0;
-    bottom: 20px;
+    bottom: 50px;
     box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.6);
 }
 
