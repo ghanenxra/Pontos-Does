@@ -607,6 +607,7 @@ body {
     overflow-x: hidden;
     overflow-y: auto;
     max-height: 250px;
+    min-width: 160px !important; /* Force content wrapper to be wide enough */
 }
 
 .video-js.vjs-custom-skin .vjs-menu-item {
@@ -616,6 +617,7 @@ body {
     padding: 10px 24px;
     text-transform: capitalize;
     transition: all 0.2s ease;
+    white-space: nowrap !important; /* Prevent text wrapping */
 }
 
 .video-js.vjs-custom-skin .vjs-menu-item:hover,
