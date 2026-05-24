@@ -1,6 +1,7 @@
-# StreamVault (Pontos-does) Cloud Video Streaming Platform
 
-StreamVault is a premium, Netflix-grade personal cloud media streaming platform built using Go (backend), HTML5 + Vanilla JS (frontend), PostgreSQL (database), and Video.js (player framework). It enables you to securely stream video files from **Google Drive**, **Terabox**, or **direct links** in a customized interface with resume-playback capabilities and watch metrics tracking.
+Pontos-does Cloud Video Streaming Platform
+
+Pontos-does is a premium, Netflix-grade personal cloud media streaming platform built using Go (backend), HTML5 + Vanilla JS (frontend), PostgreSQL (database), and Video.js (player framework). It enables you to securely stream video files from **Google Drive**, **Terabox**, or **direct links** in a customized interface with resume-playback capabilities and watch metrics tracking.
 
 ## Features
 
