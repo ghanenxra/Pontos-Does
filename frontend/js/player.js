@@ -40,8 +40,20 @@ document.addEventListener('DOMContentLoaded', () => {
         fluid: true,
         playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2],
         controlBar: {
-            pictureInPictureToggle: true,
-            volumePanel: { inline: false },
+            children: [
+                'playToggle',
+                'volumePanel',
+                'currentTimeDisplay',
+                'timeDivider',
+                'durationDisplay',
+                'progressControl',
+                'customControlSpacer',
+                'playbackRateMenuButton',
+                'subsCapsButton',
+                'audioTrackButton',
+                'pictureInPictureToggle',
+                'fullscreenToggle'
+            ]
         }
     });
 
@@ -89,9 +101,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     videojs.registerComponent('QualityButton', QualityButton);
     player.ready(function() {
-        player.controlBar.addChild('QualityButton', {}, player.controlBar.children_.length - 2);
+        // Insert Quality Button before PictureInPicture
+        const pipIndex = player.controlBar.children_.findIndex(c => c.name_ === 'PictureInPictureToggle') || player.controlBar.children_.length - 2;
+        player.controlBar.addChild('QualityButton', {}, pipIndex > 0 ? pipIndex : player.controlBar.children_.length - 2);
         
-        // Add VLC-style keyboard shortcuts (Space to toggle play, F for fullscreen, M for mute, Arrows for seek)
+        // Add VLC-style keyboard shortcuts
         if (this.hotkeys) {
             this.hotkeys({
                 volumeStep: 0.1,
@@ -99,6 +113,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 enableModifiersForNumbers: false
             });
         }
+
+        // Force Click-to-Open for Menus (disables hover)
+        setTimeout(() => {
+            document.querySelectorAll('.vjs-menu-button').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    const wasOpen = this.classList.contains('pontos-menu-open');
+                    // Close all menus first
+                    document.querySelectorAll('.vjs-menu-button').forEach(other => {
+                        other.classList.remove('pontos-menu-open');
+                    });
+                    // Toggle current
+                    if (!wasOpen) {
+                        this.classList.add('pontos-menu-open');
+                    }
+                });
+            });
+
+            // Close menus when clicking elsewhere
+            document.addEventListener('click', (e) => {
+                if (!e.target.closest('.vjs-menu-button')) {
+                    document.querySelectorAll('.vjs-menu-button').forEach(btn => {
+                        btn.classList.remove('pontos-menu-open');
+                    });
+                }
+            });
+        }, 500); // Give Video.js time to build the DOM
     });
 
     player.on('qualitySelected', (e, quality) => {

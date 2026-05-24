@@ -485,33 +485,139 @@ body {
     transform: scale(1.05);
 }
 
+/* Netflix Style Control Bar Layout */
 .video-js.vjs-custom-skin .vjs-control-bar {
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.95), rgba(0, 0, 0, 0.6), transparent);
-    height: 60px;
-    padding: 0 10px;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%);
+    height: 75px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    padding: 0 15px 12px 15px;
+}
+
+/* Progress bar at the top of the control bar, spanning full width */
+.video-js.vjs-custom-skin .vjs-progress-control {
+    width: 100%;
+    height: 20px;
+    position: absolute;
+    top: -12px;
+    left: 0;
+    align-items: center;
+    padding: 0 15px;
+}
+
+.video-js.vjs-custom-skin .vjs-progress-holder {
+    height: 6px;
+    border-radius: 3px;
+    margin: 0;
 }
 
 .video-js.vjs-custom-skin .vjs-play-progress {
     background-color: var(--accent-purple);
+    border-radius: 3px;
+}
+
+.video-js.vjs-custom-skin .vjs-play-progress:before {
+    font-size: 16px;
+    top: -5px;
+    color: #fff;
+    text-shadow: 0 0 5px rgba(192, 132, 252, 0.8);
 }
 
 .video-js.vjs-custom-skin .vjs-load-progress {
     background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
 }
 
 .video-js.vjs-custom-skin .vjs-slider {
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: rgba(255, 255, 255, 0.15);
 }
 
 .video-js.vjs-custom-skin .vjs-volume-level {
     background-color: var(--accent-purple);
 }
 
-.video-js.vjs-custom-skin .vjs-button:hover {
-    color: var(--accent-purple);
+.video-js.vjs-custom-skin .vjs-volume-panel {
+    margin-right: 15px;
 }
 
-/* Custom speed / track / quality widgets */
+/* Improve button aesthetics and centering */
+.video-js.vjs-custom-skin .vjs-button > .vjs-icon-placeholder:before {
+    font-size: 2.2em;
+    line-height: 40px;
+}
+
+.video-js.vjs-custom-skin .vjs-button:hover {
+    color: var(--accent-purple);
+    text-shadow: 0 0 10px var(--accent-purple-glow);
+}
+
+/* Force Click-to-Open Menus */
+.video-js.vjs-custom-skin .vjs-menu-button-popup:hover .vjs-menu {
+    display: none !important; /* Disable Video.js native hover */
+}
+
+/* Show menu only when our custom JS class is applied */
+.video-js.vjs-custom-skin .vjs-menu-button-popup.pontos-menu-open .vjs-menu {
+    display: block !important;
+}
+
+/* Premium Menu Dropdowns */
+.video-js.vjs-custom-skin .vjs-menu-content {
+    background-color: rgba(18, 18, 26, 0.95) !important;
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 8px 0;
+    bottom: 20px;
+    box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.6);
+}
+
+.video-js.vjs-custom-skin .vjs-menu-item {
+    font-family: var(--font-body);
+    font-weight: 500;
+    font-size: 0.95em;
+    padding: 10px 24px;
+    text-transform: capitalize;
+    transition: all 0.2s ease;
+}
+
+.video-js.vjs-custom-skin .vjs-menu-item:hover,
+.video-js.vjs-custom-skin .vjs-menu-item:focus {
+    background-color: var(--accent-purple) !important;
+    color: #fff !important;
+}
+
+.video-js.vjs-custom-skin .vjs-menu-item.vjs-selected {
+    color: var(--accent-purple);
+    background: rgba(192, 132, 252, 0.1);
+}
+
+.video-js.vjs-custom-skin .vjs-menu-item.vjs-selected:hover {
+    color: #fff;
+}
+
+/* Time display adjustments */
+.video-js.vjs-custom-skin .vjs-time-control {
+    line-height: 40px;
+    font-size: 1.05em;
+    font-weight: 500;
+    padding: 0 5px;
+}
+
+.video-js.vjs-custom-skin .vjs-time-divider {
+    padding: 0;
+    min-width: 15px;
+    text-align: center;
+}
+
+/* Custom spacer to push items to the right */
+.video-js.vjs-custom-skin .vjs-custom-control-spacer {
+    display: flex;
+    flex: 1 1 auto;
+}
+
+/* Quality Button specific style */
 .vjs-quality-selector, .vjs-subtitle-selector, .vjs-audio-selector {
     cursor: pointer;
 }
