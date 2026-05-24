@@ -127,6 +127,7 @@ body {
     cursor: pointer;
     font-size: 0.85rem;
     font-weight: 500;
+    font-family: var(--font-body);
     transition: all 0.3s ease;
 }
 
@@ -251,6 +252,7 @@ body {
     color: var(--text-primary);
     text-decoration: none;
     font-size: 1.2rem;
+    border: 1px solid var(--border-color);
     transition: all 0.3s ease;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }

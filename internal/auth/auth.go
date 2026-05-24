@@ -51,6 +51,10 @@ func Encrypt(plaintext string, key []byte) (string, error) {
 
 // Decrypt decrypts ciphertext (base64) using AES-GCM with the provided 32-byte key
 func Decrypt(cryptoText string, key []byte) (string, error) {
+	if cryptoText == "" {
+		return "", errors.New("empty ciphertext")
+	}
+
 	ciphertext, err := base64.StdEncoding.DecodeString(cryptoText)
 	if err != nil {
 		return "", err
@@ -86,6 +90,15 @@ func HashToken(token string) string {
 	return hex.EncodeToString(hash[:])
 }
 
+// GenerateRandomState generates a cryptographically random state string for OAuth CSRF protection
+func GenerateRandomState() (string, error) {
+	b := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
 // GetGoogleOAuthConfig builds the oauth2.Config from application config
 func GetGoogleOAuthConfig(cfg *config.Config) *oauth2.Config {
 	return &oauth2.Config{
@@ -93,7 +106,7 @@ func GetGoogleOAuthConfig(cfg *config.Config) *oauth2.Config {
 		ClientSecret: cfg.GoogleClientSecret,
 		RedirectURL:  cfg.GoogleRedirectURL,
 		Scopes: []string{
-			"https://www.googleapis.com/auth/drive.file",
+			"https://www.googleapis.com/auth/drive.readonly",
 			"https://www.googleapis.com/auth/userinfo.profile",
 			"https://www.googleapis.com/auth/userinfo.email",
 		},
@@ -135,15 +148,15 @@ func SetSessionCookie(w http.ResponseWriter, token string, expiresAt time.Time, 
 	})
 }
 
-// ClearSessionCookie deletes the session cookie
-func ClearSessionCookie(w http.ResponseWriter) {
+// ClearSessionCookie deletes the session cookie (respects Secure flag)
+func ClearSessionCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session_token",
 		Value:    "",
 		Expires:  time.Unix(0, 0),
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -183,14 +196,18 @@ func RefreshGoogleTokenIfNeeded(ctx context.Context, db *pgxpool.Pool, cfg *conf
 		return nil, fmt.Errorf("failed to fetch user oauth tokens: %w", err)
 	}
 
-	// Decrypt tokens
+	// Decrypt tokens (guard against empty ciphertext from first-login edge case)
 	accessToken, err := Decrypt(encAccess, cfg.OAuthEncryptionKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt access token: %w", err)
 	}
-	refreshToken, err := Decrypt(encRefresh, cfg.OAuthEncryptionKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt refresh token: %w", err)
+
+	refreshToken := ""
+	if encRefresh != "" {
+		refreshToken, err = Decrypt(encRefresh, cfg.OAuthEncryptionKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decrypt refresh token: %w", err)
+		}
 	}
 
 	tok := &oauth2.Token{
@@ -203,6 +220,10 @@ func RefreshGoogleTokenIfNeeded(ctx context.Context, db *pgxpool.Pool, cfg *conf
 	// Google tokens expire in 1 hour. If less than 5 mins remain, refresh.
 	if time.Until(tok.Expiry) > 5*time.Minute {
 		return tok, nil
+	}
+
+	if refreshToken == "" {
+		return nil, errors.New("no refresh token available and access token is expired")
 	}
 
 	// Perform refresh
@@ -258,8 +279,8 @@ func AuthRequiredMiddleware(db *pgxpool.Pool, next http.HandlerFunc) http.Handle
 
 		user, err := GetUserFromSession(r.Context(), db, cookie.Value)
 		if err != nil {
-			// Clear invalid cookie
-			ClearSessionCookie(w)
+			// Clear invalid cookie — use false for secure since we don't have config here
+			ClearSessionCookie(w, false)
 			if r.Header.Get("Accept") == "application/json" || strings.HasPrefix(r.URL.Path, "/api/") {
 				http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
 			} else {
@@ -272,9 +293,4 @@ func AuthRequiredMiddleware(db *pgxpool.Pool, next http.HandlerFunc) http.Handle
 		ctx := context.WithValue(r.Context(), UserContextKey, user)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	}
-}
-
-// Helper to check if string contains specific prefix (needed for routing checks)
-func stringsHasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }

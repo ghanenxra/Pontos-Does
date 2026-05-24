@@ -97,8 +97,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         ctx.stroke();
 
-        // Increment phase
-        phase += speed;
+        // Increment phase (wrap at 2π to prevent floating-point precision loss)
+        phase = (phase + speed) % (Math.PI * 2);
 
         requestAnimationFrame(animate);
     }

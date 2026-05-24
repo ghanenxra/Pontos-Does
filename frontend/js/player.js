@@ -5,6 +5,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentVideoId = null;
     let currentUser = null;
 
+    // HTML entity escaper for XSS prevention
+    function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
     // Load active user details
     fetch('/api/me')
         .then(res => {
@@ -15,9 +23,11 @@ document.addEventListener('DOMContentLoaded', () => {
             currentUser = user;
             const profileHeader = document.getElementById('user-profile-header');
             if (profileHeader) {
+                const safeName = escapeHtml(user.name);
+                const safeAvatar = escapeHtml(user.avatar_url) || 'https://www.gravatar.com/avatar?d=mp';
                 profileHeader.innerHTML = `
-                    <span style="font-weight: 500; font-size: 0.9rem; color: var(--text-secondary);">${user.name}</span>
-                    <img src="${user.avatar_url || 'https://www.gravatar.com/avatar?d=mp'}" class="user-avatar" alt="Avatar">
+                    <span style="font-weight: 500; font-size: 0.9rem; color: var(--text-secondary);">${safeName}</span>
+                    <img src="${safeAvatar}" class="user-avatar" alt="Avatar">
                 `;
             }
         })
@@ -26,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
     // Initialize Video.js Player with speeds and options
-    const player = videojs('streamvault-player', {
+    const player = videojs('pontos-player', {
         fluid: true,
         playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2],
         controlBar: {
@@ -35,44 +45,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // Error Listener for debugging and recruiters
+    // Error Listener for debugging
     player.on('error', () => {
         const error = player.error();
         console.error('Video.js Player encountered an error:', error);
-        alert(`Playback Issue: ${error.message} (Code: ${error.code}).\n\nTips:\n- Make sure the stream URL is correct and accessible.\n- Recruiter demo check: Ensure direct URLs are valid .mp4 or .m3u8 streams.\n- MKV files are not supported natively by web browsers.`);
+        alert(`Playback Issue: ${error.message} (Code: ${error.code}).\n\nTips:\n- Make sure the stream URL is correct and accessible.\n- Ensure direct URLs are valid .mp4 or .m3u8 streams.\n- MKV/WebM files may not be supported natively by all browsers.`);
     });
 
-    // Custom Quality Selector in Video.js control bar
-    const Button = videojs.getComponent('MenuButton');
+    // Custom Quality Selector using ES6 classes (Video.js v8 compatible)
+    const MenuButton = videojs.getComponent('MenuButton');
     const MenuItem = videojs.getComponent('MenuItem');
 
-    const QualityMenuItem = videojs.extend(MenuItem, {
-        constructor: function(player, options) {
-            MenuItem.call(this, player, options);
-            this.label = options.label;
-        },
-        handleClick: function() {
-            this.player().trigger('qualitySelected', this.label);
+    class QualityMenuItem extends MenuItem {
+        constructor(player, options) {
+            super(player, options);
+            this.label_ = options.label;
         }
-    });
 
-    const QualityButton = videojs.extend(Button, {
-        constructor: function(player, options) {
-            Button.call(this, player, options);
+        handleClick() {
+            this.player().trigger('qualitySelected', this.label_);
+        }
+    }
+
+    class QualityButton extends MenuButton {
+        constructor(player, options) {
+            super(player, options);
             this.controlText('Quality');
-        },
-        createItems: function() {
+        }
+
+        createItems() {
             const qualities = ['Auto (Original)', '1080p', '720p', '480p'];
             return qualities.map(q => new QualityMenuItem(this.player(), {
                 label: q,
                 selectable: true,
                 selected: q === 'Auto (Original)'
             }));
-        },
-        buildCSSClass: function() {
-            return 'vjs-icon-cog ' + Button.prototype.buildCSSClass.call(this);
         }
-    });
+
+        buildCSSClass() {
+            return 'vjs-icon-cog ' + super.buildCSSClass();
+        }
+    }
 
     videojs.registerComponent('QualityButton', QualityButton);
     player.ready(() => {
@@ -88,14 +101,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const tabs = document.querySelectorAll('.tab-btn');
     const tabContents = document.querySelectorAll('.tab-content');
 
+    function switchToTab(tabName) {
+        tabs.forEach(t => {
+            t.classList.toggle('active', t.dataset.tab === tabName);
+        });
+        tabContents.forEach(c => c.classList.remove('active'));
+        const target = document.getElementById(`tab-${tabName}`);
+        if (target) target.classList.add('active');
+    }
+
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
-            tabs.forEach(t => t.classList.remove('active'));
-            tabContents.forEach(c => c.classList.remove('active'));
-
-            tab.classList.add('active');
-            const target = document.getElementById(`tab-${tab.dataset.tab}`);
-            if (target) target.classList.add('active');
+            switchToTab(tab.dataset.tab);
         });
     });
 
@@ -103,26 +120,30 @@ document.addEventListener('DOMContentLoaded', () => {
     let pickerApiLoaded = false;
     let configSettings = null;
 
-    // Safe check to load Google Client config if gapi exists
-    if (typeof gapi !== 'undefined') {
-        fetch('/api/config')
-            .then(res => res.json())
-            .then(cfg => {
-                configSettings = cfg;
-                gapi.load('picker', { 'callback': () => { pickerApiLoaded = true; } });
-            })
-            .catch(err => {
-                console.warn('Google Cloud configuration endpoint error:', err);
-            });
-    } else {
-        console.warn('Google APIs Client script (gapi) is not loaded or is blocked by browser settings.');
+    // Load gapi with retry — handles race condition where gapi CDN script hasn't loaded yet
+    function initGapi() {
+        if (typeof gapi !== 'undefined') {
+            fetch('/api/config')
+                .then(res => res.json())
+                .then(cfg => {
+                    configSettings = cfg;
+                    gapi.load('picker', { 'callback': () => { pickerApiLoaded = true; } });
+                })
+                .catch(err => {
+                    console.warn('Google Cloud configuration endpoint error:', err);
+                });
+        } else {
+            // Retry after a short delay if gapi hasn't loaded yet
+            setTimeout(initGapi, 500);
+        }
     }
+    initGapi();
 
     const pickerBtn = document.getElementById('picker-btn');
     if (pickerBtn) {
         pickerBtn.addEventListener('click', () => {
             if (typeof google === 'undefined' || typeof google.picker === 'undefined' || !pickerApiLoaded || !configSettings) {
-                alert('Google Picker libraries are blocked or not loaded. Direct streaming (Terabox / Direct URL) remains fully active.');
+                alert('Google Picker libraries are blocked or not loaded yet. Please wait a moment and try again.\n\nDirect streaming (Terabox / Direct URL) remains fully active.');
                 return;
             }
 
@@ -142,10 +163,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openGooglePicker(oauthToken) {
-        // Allow picking folders AND specific video files (important for drive.file permissions)
+        // Allow picking folders AND specific video files
         const docsView = new google.picker.DocsView()
             .setIncludeFolders(true)
-            .setMimeTypes('application/vnd.google-apps.folder,video/mp4,video/mkv,video/webm,video/quicktime');
+            .setMimeTypes('application/vnd.google-apps.folder,video/mp4,video/x-matroska,video/webm,video/quicktime');
 
         const picker = new google.picker.PickerBuilder()
             .addView(docsView)
@@ -210,7 +231,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`
                         : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
                     
-                    div.innerHTML = `${icon} <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${file.name}</span>`;
+                    const safeName = escapeHtml(file.name);
+                    div.innerHTML = `${icon} <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${safeName}</span>`;
                     
                     div.addEventListener('click', () => {
                         if (isFolder) {
@@ -224,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             })
             .catch(err => {
-                container.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: #ef4444; font-size: 0.85rem;">Error loading items: ${err.message}</div>`;
+                container.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: #ef4444; font-size: 0.85rem;">Error loading items: ${escapeHtml(err.message)}</div>`;
             });
     }
 
@@ -245,6 +267,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Helper: set button loading state
+    function setButtonLoading(btn, loading) {
+        if (!btn) return;
+        if (loading) {
+            btn.disabled = true;
+            btn.dataset.originalText = btn.textContent;
+            btn.textContent = 'Loading...';
+            btn.style.opacity = '0.6';
+            btn.style.cursor = 'not-allowed';
+        } else {
+            btn.disabled = false;
+            btn.textContent = btn.dataset.originalText || 'Load Stream';
+            btn.style.opacity = '';
+            btn.style.cursor = '';
+        }
+    }
+
     // Terabox Loading Input
     const loadTeraboxBtn = document.getElementById('load-terabox-btn');
     if (loadTeraboxBtn) {
@@ -257,7 +296,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            setButtonLoading(loadTeraboxBtn, true);
             loadVideo('terabox', urlInput, titleInput);
+            // Re-enable after player starts loading
+            setTimeout(() => setButtonLoading(loadTeraboxBtn, false), 3000);
         });
     }
 
@@ -273,7 +315,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            setButtonLoading(loadDirectBtn, true);
             loadVideo('direct', urlInput, titleInput);
+            setTimeout(() => setButtonLoading(loadDirectBtn, false), 3000);
         });
     }
 
@@ -328,21 +372,27 @@ document.addEventListener('DOMContentLoaded', () => {
             player.removeRemoteTextTrack(tracks[i]);
         }
 
-        if (sourceType === 'gdrive' && folderId) {
-            fetch(`/api/drive/subtitles?folderId=${folderId}`)
-                .then(res => res.json())
-                .then(subs => {
-                    subs.forEach(sub => {
-                        player.addRemoteTextTrack({
-                            kind: 'subtitles',
-                            src: `/api/stream?source=gdrive&fileId=${sub.id}`,
-                            srclang: 'en',
-                            label: sub.name,
-                            default: sub.name.toLowerCase().includes('eng')
-                        }, true);
-                    });
-                })
-                .catch(err => console.log('Error loading subtitles:', err));
+        // Load subtitles for GDrive videos — works with folder navigation AND direct pick/resume
+        if (sourceType === 'gdrive') {
+            const subFolderId = folderId || sourceId; // Use folderId if from folder nav, otherwise try video's parent
+            if (folderId) {
+                fetch(`/api/drive/subtitles?folderId=${subFolderId}`)
+                    .then(res => res.json())
+                    .then(subs => {
+                        if (Array.isArray(subs)) {
+                            subs.forEach(sub => {
+                                player.addRemoteTextTrack({
+                                    kind: 'subtitles',
+                                    src: `/api/stream?source=gdrive&fileId=${sub.id}`,
+                                    srclang: 'en',
+                                    label: sub.name,
+                                    default: sub.name.toLowerCase().includes('eng')
+                                }, true);
+                            });
+                        }
+                    })
+                    .catch(err => console.log('Error loading subtitles:', err));
+            }
         }
 
         // Initialize watch session and pings immediately
@@ -357,10 +407,24 @@ document.addEventListener('DOMContentLoaded', () => {
         // Query database immediately with initial duration 0
         let duration = 0;
         
-        // Setup listener to fetch actual duration once metadata resolves
+        // Setup listener to fetch actual duration once metadata resolves,
+        // then PATCH the video record in the database with the real duration
         player.one('loadedmetadata', () => {
             const actualDuration = Math.floor(player.duration()) || 0;
             console.log('Video metadata loaded. Duration:', actualDuration);
+
+            // Update duration in the backend database
+            if (actualDuration > 0 && currentVideoId) {
+                fetch('/api/video/duration', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        video_id: currentVideoId,
+                        duration_seconds: actualDuration
+                    })
+                }).catch(err => console.warn('Duration update failed:', err));
+            }
+
             // Autoplay the video after metadata loads
             player.play().catch(() => {});
         });
@@ -426,19 +490,25 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (currentSessionId) {
-            const pos = Math.floor(player.currentTime());
+            const pos = Math.floor(player.currentTime() || 0);
             
             const payload = JSON.stringify({
                 session_id: currentSessionId,
                 position_seconds: pos
             });
 
-            // Make standard end watch call
-            fetch('/api/watch/end', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: payload
-            }).catch(err => console.warn('End session issue:', err));
+            // Use sendBeacon for reliable delivery during page unload
+            // Fall back to fetch for normal (non-unload) calls
+            try {
+                const blob = new Blob([payload], { type: 'application/json' });
+                navigator.sendBeacon('/api/watch/end', blob);
+            } catch (e) {
+                fetch('/api/watch/end', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: payload
+                }).catch(err => console.warn('End session issue:', err));
+            }
             
             currentSessionId = null;
         }
@@ -457,6 +527,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const resumeTitle = urlParams.get('title');
 
     if (resumeSource && resumeId && resumeTitle) {
+        // Switch to the correct sidebar tab based on source type
+        switchToTab(resumeSource === 'gdrive' ? 'gdrive' : resumeSource === 'terabox' ? 'terabox' : 'direct');
         loadVideo(resumeSource, resumeId, resumeTitle);
     }
 });

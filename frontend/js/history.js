@@ -1,6 +1,14 @@
 document.addEventListener('DOMContentLoaded', () => {
     let currentUser = null;
 
+    // HTML entity escaper for XSS prevention
+    function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
     // Load active user details
     fetch('/api/me')
         .then(res => {
@@ -11,9 +19,11 @@ document.addEventListener('DOMContentLoaded', () => {
             currentUser = user;
             const profileHeader = document.getElementById('user-profile-header');
             if (profileHeader) {
+                const safeName = escapeHtml(user.name);
+                const safeAvatar = escapeHtml(user.avatar_url) || 'https://www.gravatar.com/avatar?d=mp';
                 profileHeader.innerHTML = `
-                    <span style="font-weight: 500; font-size: 0.9rem; color: var(--text-secondary);">${user.name}</span>
-                    <img src="${user.avatar_url || 'https://www.gravatar.com/avatar?d=mp'}" class="user-avatar" alt="Avatar">
+                    <span style="font-weight: 500; font-size: 0.9rem; color: var(--text-secondary);">${safeName}</span>
+                    <img src="${safeAvatar}" class="user-avatar" alt="Avatar">
                 `;
             }
         })
@@ -24,14 +34,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const sortSelect = document.getElementById('sort-select');
     const historyGrid = document.getElementById('history-grid');
 
-    sortSelect.addEventListener('change', () => {
-        loadHistory(sortSelect.value);
-    });
+    // Null guards — prevent TypeError if DOM elements are missing
+    if (sortSelect) {
+        sortSelect.addEventListener('change', () => {
+            loadHistory(sortSelect.value);
+        });
+    }
 
     // Default load
     loadHistory('last_watched');
 
     function loadHistory(sortBy) {
+        if (!historyGrid) return;
+        
         historyGrid.innerHTML = `
             <div style="grid-column: 1/-1; padding: 5rem 0; text-align: center; color: var(--text-secondary);">
                 Loading history cards...
@@ -47,15 +62,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderHistory(data.items || []);
             })
             .catch(err => {
+                if (!historyGrid) return;
                 historyGrid.innerHTML = `
                     <div style="grid-column: 1/-1; padding: 5rem 0; text-align: center; color: #ef4444;">
-                        Error loading watch history: ${err.message}
+                        Error loading watch history: ${escapeHtml(err.message)}
                     </div>
                 `;
             });
     }
 
     function renderHistory(items) {
+        if (!historyGrid) return;
         historyGrid.innerHTML = '';
 
         if (items.length === 0) {
@@ -84,17 +101,22 @@ document.addEventListener('DOMContentLoaded', () => {
             const dateStr = formatDateRelative(new Date(item.last_watched));
             const durationStr = formatSeconds(item.duration_seconds);
 
+            // Sanitize all user-sourced strings for XSS safety
+            const safeTitle = escapeHtml(item.title);
+            const safeSourceType = escapeHtml(item.source_type);
+            const safeThumbnail = escapeHtml(item.thumbnail_url) || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&auto=format&fit=crop&q=60';
+
             // Construct resume Link
-            const resumeUrl = `/player?source=${item.source_type}&id=${encodeURIComponent(item.source_id)}&title=${encodeURIComponent(item.title)}`;
+            const resumeUrl = `/player?source=${encodeURIComponent(item.source_type)}&id=${encodeURIComponent(item.source_id)}&title=${encodeURIComponent(item.title)}`;
 
             card.innerHTML = `
                 <div class="card-thumbnail-wrapper">
-                    <img src="${item.thumbnail_url || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&auto=format&fit=crop&q=60'}" class="card-thumbnail" alt="Thumbnail">
-                    <span class="source-badge ${item.source_type}">${item.source_type}</span>
+                    <img src="${safeThumbnail}" class="card-thumbnail" alt="Thumbnail">
+                    <span class="source-badge ${safeSourceType}">${safeSourceType}</span>
                     <span class="duration-badge">${durationStr}</span>
                 </div>
                 <div class="card-body">
-                    <h3 class="card-title" title="${item.title}">${item.title}</h3>
+                    <h3 class="card-title" title="${safeTitle}">${safeTitle}</h3>
                     <div class="card-meta">
                         <span><strong>Watched:</strong> ${dateStr}</span>
                         <span><strong>Time Spent:</strong> ${timeStr} (${item.watch_count} session${item.watch_count > 1 ? 's' : ''})</span>
@@ -121,7 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Helper: format total cumulative seconds to readable hours/minutes
     function formatDuration(totalSeconds) {
-        if (totalSeconds < 60) return `${totalSeconds}s`;
+        if (!totalSeconds || totalSeconds < 60) return `${totalSeconds || 0}s`;
         const mins = Math.floor(totalSeconds / 60);
         if (mins < 60) return `${mins}m`;
         const hrs = Math.floor(mins / 60);
@@ -132,6 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Helper: format standard video length
     function formatSeconds(secs) {
         if (!secs || secs <= 0) return '0:00';
+        secs = Math.floor(secs); // Guard against floating point
         const h = Math.floor(secs / 3600);
         const m = Math.floor((secs % 3600) / 60);
         const s = secs % 60;

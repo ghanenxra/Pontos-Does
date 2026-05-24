@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -64,7 +65,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/auth/logout", h.HandleLogout)
 
 	// API routes (auth required)
-	mux.HandleFunc("/api/config", h.HandleGetConfig) // Exposes Google Client ID & API Key for frontend Google Picker
+	mux.HandleFunc("/api/config", auth.AuthRequiredMiddleware(h.DB, h.HandleGetConfig))
 	mux.HandleFunc("/api/drive/token", auth.AuthRequiredMiddleware(h.DB, h.HandleDriveToken))
 	mux.HandleFunc("/api/me", auth.AuthRequiredMiddleware(h.DB, h.HandleGetMe))
 	mux.HandleFunc("/api/stream", auth.AuthRequiredMiddleware(h.DB, h.HandleStream))
@@ -73,6 +74,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/watch/start", auth.AuthRequiredMiddleware(h.DB, h.HandleWatchStart))
 	mux.HandleFunc("/api/watch/ping", auth.AuthRequiredMiddleware(h.DB, h.HandleWatchPing))
 	mux.HandleFunc("/api/watch/end", auth.AuthRequiredMiddleware(h.DB, h.HandleWatchEnd))
+	mux.HandleFunc("/api/video/duration", auth.AuthRequiredMiddleware(h.DB, h.HandleUpdateDuration))
 	mux.HandleFunc("/api/history", auth.AuthRequiredMiddleware(h.DB, h.HandleHistoryRouter))
 }
 
@@ -85,6 +87,10 @@ func WriteJSON(w http.ResponseWriter, status int, data interface{}) {
 
 // HandleGetConfig exposes safe client configurations to the frontend (Picker API)
 func (h *Handlers) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]string{
 		"clientId":     h.Config.GoogleClientID,
 		"developerKey": h.Config.GoogleAPIKey,
@@ -93,6 +99,10 @@ func (h *Handlers) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 // HandleDriveToken returns the active Google OAuth token
 func (h *Handlers) HandleDriveToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	user := r.Context().Value(auth.UserContextKey).(*models.User)
 	tok, err := auth.RefreshGoogleTokenIfNeeded(r.Context(), h.DB, h.Config, user.ID)
 	if err != nil {
@@ -105,8 +115,25 @@ func (h *Handlers) HandleDriveToken(w http.ResponseWriter, r *http.Request) {
 // HandleGoogleLogin starts Google OAuth flow
 func (h *Handlers) HandleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	oauthCfg := auth.GetGoogleOAuthConfig(h.Config)
+
+	// Generate a random CSRF state token and store it in a short-lived cookie
+	state, err := auth.GenerateRandomState()
+	if err != nil {
+		http.Error(w, "failed to generate state", http.StatusInternalServerError)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		Path:     "/",
+		MaxAge:   300, // 5 minutes
+		HttpOnly: true,
+		Secure:   h.Config.SessionCookieSecure,
+		SameSite: http.SameSiteLaxMode,
+	})
+
 	// Force consent and offline access to ensure we get a refresh token and grant GDrive scope
-	url := oauthCfg.AuthCodeURL("state", oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
+	url := oauthCfg.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
@@ -118,6 +145,26 @@ func (h *Handlers) HandleGoogleCallback(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "missing code parameter", http.StatusBadRequest)
 		return
 	}
+
+	// Validate CSRF state
+	stateCookie, err := r.Cookie("oauth_state")
+	if err != nil || stateCookie.Value == "" {
+		http.Error(w, "missing state cookie", http.StatusBadRequest)
+		return
+	}
+	queryState := r.URL.Query().Get("state")
+	if queryState != stateCookie.Value {
+		http.Error(w, "invalid state parameter (CSRF check failed)", http.StatusForbidden)
+		return
+	}
+	// Clear the state cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+	})
 
 	oauthCfg := auth.GetGoogleOAuthConfig(h.Config)
 	tok, err := oauthCfg.Exchange(ctx, code)
@@ -212,26 +259,46 @@ func (h *Handlers) HandleLogout(w http.ResponseWriter, r *http.Request) {
 		tokenHash := auth.HashToken(cookie.Value)
 		_, _ = h.DB.Exec(r.Context(), "DELETE FROM sessions WHERE token_hash = $1", tokenHash)
 	}
-	auth.ClearSessionCookie(w)
+	auth.ClearSessionCookie(w, h.Config.SessionCookieSecure)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// HandleGetMe returns information about the current user
+// HandleGetMe returns information about the current user (sanitized — no internal IDs)
 func (h *Handlers) HandleGetMe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	user := r.Context().Value(auth.UserContextKey).(*models.User)
-	WriteJSON(w, http.StatusOK, user)
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"id":         user.ID,
+		"name":       user.Name,
+		"email":      user.Email,
+		"avatar_url": user.AvatarURL,
+	})
 }
 
 // HandleStream handles range requests and proxies binary streams
 func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	user := r.Context().Value(auth.UserContextKey).(*models.User)
 	source := r.URL.Query().Get("source")
+	_ = user // user validated by middleware
 
 	switch source {
 	case "gdrive":
 		fileId := r.URL.Query().Get("fileId")
 		if fileId == "" {
 			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "fileId is required"})
+			return
+		}
+
+		// Validate fileId format (alphanumeric, hyphens, underscores)
+		if !isValidGDriveID(fileId) {
+			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid fileId format"})
 			return
 		}
 
@@ -301,12 +368,29 @@ func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// isValidGDriveID validates that a Google Drive file/folder ID is well-formed
+func isValidGDriveID(id string) bool {
+	// GDrive IDs are alphanumeric with hyphens and underscores, 10-60 chars
+	matched, _ := regexp.MatchString(`^[a-zA-Z0-9_-]{10,60}$`, id)
+	return matched
+}
+
 // HandleDriveFiles lists folders and video files in the specified folderId from GDrive
 func (h *Handlers) HandleDriveFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	user := r.Context().Value(auth.UserContextKey).(*models.User)
 	folderID := r.URL.Query().Get("folderId")
 	if folderID == "" {
 		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "folderId is required"})
+		return
+	}
+
+	// Validate folderId format
+	if !isValidGDriveID(folderID) {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid folderId format"})
 		return
 	}
 
@@ -352,6 +436,10 @@ func (h *Handlers) HandleDriveFiles(w http.ResponseWriter, r *http.Request) {
 
 // HandleDriveSubtitles looks for SRT or VTT subtitle files in the same folder as the video file
 func (h *Handlers) HandleDriveSubtitles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	user := r.Context().Value(auth.UserContextKey).(*models.User)
 	folderID := r.URL.Query().Get("folderId")
 	if folderID == "" {
@@ -406,8 +494,51 @@ func (h *Handlers) HandleDriveSubtitles(w http.ResponseWriter, r *http.Request) 
 	WriteJSON(w, http.StatusOK, result.Files)
 }
 
+// HandleUpdateDuration updates the video's duration_seconds after metadata loads on the frontend
+func (h *Handlers) HandleUpdateDuration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	user := r.Context().Value(auth.UserContextKey).(*models.User)
+
+	var reqBody struct {
+		VideoID         string `json:"video_id"`
+		DurationSeconds int    `json:"duration_seconds"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
+		return
+	}
+
+	if reqBody.VideoID == "" || reqBody.DurationSeconds <= 0 {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "video_id and positive duration_seconds are required"})
+		return
+	}
+
+	// Only update if the video belongs to the current user and existing duration is 0
+	ctx := r.Context()
+	updateQuery := `
+		UPDATE videos
+		SET duration_seconds = $1, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2 AND user_id = $3 AND duration_seconds = 0
+	`
+	_, err := h.DB.Exec(ctx, updateQuery, reqBody.DurationSeconds, reqBody.VideoID, user.ID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update duration"})
+		return
+	}
+
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // HandleWatchStart creates or loads a video in DB, then starts a tracking watch_session
 func (h *Handlers) HandleWatchStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	user := r.Context().Value(auth.UserContextKey).(*models.User)
 
 	var reqBody struct {
@@ -491,6 +622,10 @@ func (h *Handlers) HandleWatchStart(w http.ResponseWriter, r *http.Request) {
 
 // HandleWatchPing updates session details every 10s
 func (h *Handlers) HandleWatchPing(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	user := r.Context().Value(auth.UserContextKey).(*models.User)
 
 	var reqBody struct {
@@ -545,6 +680,10 @@ func (h *Handlers) HandleWatchPing(w http.ResponseWriter, r *http.Request) {
 
 // HandleWatchEnd updates final states and stops logs
 func (h *Handlers) HandleWatchEnd(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	user := r.Context().Value(auth.UserContextKey).(*models.User)
 
 	var reqBody struct {
@@ -605,6 +744,10 @@ func (h *Handlers) HandleWatchEnd(w http.ResponseWriter, r *http.Request) {
 
 // HandleHistoryRouter filters history lists or targets specific items
 func (h *Handlers) HandleHistoryRouter(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
 	// Extract sub-paths: check if path contains an ID (e.g. /api/history/video-uuid)
 	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/history"), "/")
 
@@ -633,12 +776,16 @@ func (h *Handlers) HandleListHistory(w http.ResponseWriter, r *http.Request) {
 	offset := (page - 1) * limit
 
 	sortBy := r.URL.Query().Get("sort_by")
-	orderClause := "ws.updated_at DESC" // default: last watched
 
-	if sortBy == "most_watched" {
-		orderClause = "watch_count DESC, ws.updated_at DESC"
-	} else if sortBy == "longest_session" {
-		orderClause = "max_session_time DESC, ws.updated_at DESC"
+	// Whitelist-based order clause selection — prevents SQL injection
+	orderClauses := map[string]string{
+		"last_watched":    "ws.updated_at DESC",
+		"most_watched":    "watch_count DESC, ws.updated_at DESC",
+		"longest_session": "max_session_time DESC, ws.updated_at DESC",
+	}
+	orderClause, ok := orderClauses[sortBy]
+	if !ok {
+		orderClause = "ws.updated_at DESC" // default
 	}
 
 	ctx := r.Context()
@@ -707,6 +854,12 @@ func (h *Handlers) HandleListHistory(w http.ResponseWriter, r *http.Request) {
 		items = append(items, it)
 	}
 
+	// Check for iteration errors
+	if err := rows.Err(); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
 		"page":  page,
 		"limit": limit,
@@ -763,6 +916,12 @@ func (h *Handlers) HandleGetVideoHistory(w http.ResponseWriter, r *http.Request,
 			return
 		}
 		sessions = append(sessions, s)
+	}
+
+	// Check for iteration errors
+	if err := rows.Err(); err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 
 	WriteJSON(w, http.StatusOK, map[string]interface{}{
