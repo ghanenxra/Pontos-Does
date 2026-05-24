@@ -20,7 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const loginContainer = document.getElementById('login-container');
             if (loginContainer) {
                 loginContainer.innerHTML = `
-                    <a href="/player" class="google-signin-btn small-btn" style="background: var(--accent-purple); color: #0a0a0f; border-color: var(--accent-purple);">
+                    <a href="/player" class="auth-btn" style="background: var(--accent-purple); color: #0a0a0f; border-color: var(--accent-purple); padding: 11px 32px;">
                         Go to Player
                     </a>
                 `;

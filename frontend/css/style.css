@@ -153,45 +153,33 @@ body {
     z-index: 10;
 }
 
-.google-signin-btn {
+.auth-btn {
     display: inline-flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     background: #ffffff;
     color: #1f2937;
     font-family: var(--font-body);
     font-weight: 600;
-    padding: 12px 24px;
+    padding: 11px 22px;
     border-radius: 30px;
     text-decoration: none;
     border: 1px solid #e5e7eb;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    font-size: 0.95rem;
+    font-size: 0.9rem;
     cursor: pointer;
 }
 
-.google-signin-btn:hover {
+.auth-btn:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px rgba(192, 132, 252, 0.3);
     background: #fdfdfd;
 }
 
 .google-icon {
-    width: 18px;
-    height: 18px;
-}
-
-.google-signin-btn.small-btn {
-    padding: 8px 16px;
-    font-size: 0.82rem;
-    gap: 8px;
-    border-radius: 20px;
-}
-
-.google-signin-btn.small-btn .google-icon {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
 }
 
 /* Hero Centered Section */

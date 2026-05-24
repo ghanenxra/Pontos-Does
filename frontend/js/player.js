@@ -103,34 +103,43 @@ document.addEventListener('DOMContentLoaded', () => {
     let pickerApiLoaded = false;
     let configSettings = null;
 
-    // Fetch Google Client ID & Developer Key from backend
-    fetch('/api/config')
-        .then(res => res.json())
-        .then(cfg => {
-            configSettings = cfg;
-            gapi.load('picker', { 'callback': () => { pickerApiLoaded = true; } });
-        });
-
-    const pickerBtn = document.getElementById('picker-btn');
-    pickerBtn.addEventListener('click', () => {
-        if (!pickerApiLoaded || !configSettings) {
-            alert('Google Picker API is still loading. Please retry in a second.');
-            return;
-        }
-
-        // Securely fetch short-lived GDrive access token from database
-        fetch('/api/drive/token')
-            .then(res => {
-                if (!res.ok) throw new Error('Could not fetch drive token');
-                return res.json();
-            })
-            .then(data => {
-                openGooglePicker(data.token);
+    // Safe check to load Google Client config if gapi exists
+    if (typeof gapi !== 'undefined') {
+        fetch('/api/config')
+            .then(res => res.json())
+            .then(cfg => {
+                configSettings = cfg;
+                gapi.load('picker', { 'callback': () => { pickerApiLoaded = true; } });
             })
             .catch(err => {
-                alert('Google Authentication Issue: ' + err.message + '\n\nMake sure your google account is logged in and credentials in .env are set.');
+                console.warn('Google Cloud configuration endpoint error:', err);
             });
-    });
+    } else {
+        console.warn('Google APIs Client script (gapi) is not loaded or is blocked by browser settings.');
+    }
+
+    const pickerBtn = document.getElementById('picker-btn');
+    if (pickerBtn) {
+        pickerBtn.addEventListener('click', () => {
+            if (typeof google === 'undefined' || typeof google.picker === 'undefined' || !pickerApiLoaded || !configSettings) {
+                alert('Google Picker libraries are blocked or not loaded. Direct streaming (Terabox / Direct URL) remains fully active.');
+                return;
+            }
+
+            // Securely fetch short-lived GDrive access token from database
+            fetch('/api/drive/token')
+                .then(res => {
+                    if (!res.ok) throw new Error('Could not fetch drive token');
+                    return res.json();
+                })
+                .then(data => {
+                    openGooglePicker(data.token);
+                })
+                .catch(err => {
+                    alert('Google Authentication Issue: ' + err.message + '\n\nMake sure you have logged in via Google OAuth first.');
+                });
+        });
+    }
 
     function openGooglePicker(oauthToken) {
         // Allow picking folders AND specific video files (important for drive.file permissions)
@@ -164,8 +173,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function displayFolder(folderId, folderName) {
         const infoDiv = document.getElementById('folder-info');
         const nameSpan = document.getElementById('folder-name');
-        nameSpan.textContent = folderName;
-        infoDiv.style.display = 'flex';
+        if (nameSpan) nameSpan.textContent = folderName;
+        if (infoDiv) infoDiv.style.display = 'flex';
 
         loadDriveFiles(folderId);
     }
@@ -173,6 +182,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // List files and directories within a Google Drive folder
     function loadDriveFiles(folderId) {
         const container = document.getElementById('file-list-container');
+        if (!container) return;
+        
         container.innerHTML = `<div style="padding: 1.5rem; text-align: center; color: var(--text-muted);">Loading folder items...</div>`;
 
         fetch(`/api/drive/files?folderId=${folderId}`)
@@ -217,57 +228,54 @@ document.addEventListener('DOMContentLoaded', () => {
             });
     }
 
-    document.getElementById('clear-folder').addEventListener('click', (e) => {
-        e.preventDefault();
-        document.getElementById('folder-info').style.display = 'none';
-        document.getElementById('file-list-container').innerHTML = `
-            <div style="padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
-                No folder selected yet.
-            </div>
-        `;
-    });
-
-    // Manual Google Drive File ID Loading Input
-    const loadGdriveFileBtn = document.getElementById('load-gdrive-file-btn');
-    loadGdriveFileBtn.addEventListener('click', () => {
-        const fileIdInput = document.getElementById('gdrive-file-id').value.trim();
-        const titleInput = document.getElementById('gdrive-file-title').value.trim();
-
-        if (!fileIdInput || !titleInput) {
-            alert('Please enter both the GDrive File ID and the Video Title.');
-            return;
-        }
-
-        loadVideo('gdrive', fileIdInput, titleInput);
-    });
+    const clearFolderBtn = document.getElementById('clear-folder');
+    if (clearFolderBtn) {
+        clearFolderBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const infoDiv = document.getElementById('folder-info');
+            const container = document.getElementById('file-list-container');
+            if (infoDiv) infoDiv.style.display = 'none';
+            if (container) {
+                container.innerHTML = `
+                    <div style="padding: 1.5rem; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
+                        No folder selected yet.
+                    </div>
+                `;
+            }
+        });
+    }
 
     // Terabox Loading Input
     const loadTeraboxBtn = document.getElementById('load-terabox-btn');
-    loadTeraboxBtn.addEventListener('click', () => {
-        const urlInput = document.getElementById('terabox-url').value.trim();
-        const titleInput = document.getElementById('terabox-title').value.trim();
+    if (loadTeraboxBtn) {
+        loadTeraboxBtn.addEventListener('click', () => {
+            const urlInput = document.getElementById('terabox-url').value.trim();
+            const titleInput = document.getElementById('terabox-title').value.trim();
 
-        if (!urlInput || !titleInput) {
-            alert('Please fill out all fields.');
-            return;
-        }
+            if (!urlInput || !titleInput) {
+                alert('Please fill out all fields.');
+                return;
+            }
 
-        loadVideo('terabox', urlInput, titleInput);
-    });
+            loadVideo('terabox', urlInput, titleInput);
+        });
+    }
 
     // Direct URL Loading Input
     const loadDirectBtn = document.getElementById('load-direct-btn');
-    loadDirectBtn.addEventListener('click', () => {
-        const urlInput = document.getElementById('direct-url').value.trim();
-        const titleInput = document.getElementById('direct-title').value.trim();
+    if (loadDirectBtn) {
+        loadDirectBtn.addEventListener('click', () => {
+            const urlInput = document.getElementById('direct-url').value.trim();
+            const titleInput = document.getElementById('direct-title').value.trim();
 
-        if (!urlInput || !titleInput) {
-            alert('Please fill out all fields.');
-            return;
-        }
+            if (!urlInput || !titleInput) {
+                alert('Please fill out all fields.');
+                return;
+            }
 
-        loadVideo('direct', urlInput, titleInput);
-    });
+            loadVideo('direct', urlInput, titleInput);
+        });
+    }
 
     // Helper to identify the correct stream MIME type for Video.js (MP4 vs HLS .m3u8)
     function getStreamType(url) {
@@ -290,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
         endWatchSession();
 
         const videoTitleEl = document.getElementById('now-playing-title');
-        videoTitleEl.textContent = title;
+        if (videoTitleEl) videoTitleEl.textContent = title;
 
         let srcUrl = '';
         let type = 'video/mp4';
@@ -346,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // -------------------------------------------------------------
 
     function startWatchSession(sourceType, sourceId, title, thumbnail) {
-        // Query database immediately with initial duration 0 (will update on ping/metadata load)
+        // Query database immediately with initial duration 0
         let duration = 0;
         
         // Setup listener to fetch actual duration once metadata resolves
