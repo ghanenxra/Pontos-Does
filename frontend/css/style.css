@@ -576,12 +576,22 @@ body {
 }
 
 /* Force Click-to-Open Menus */
-.video-js.vjs-custom-skin .vjs-menu-button-popup:hover .vjs-menu {
+.video-js.vjs-custom-skin .vjs-menu-button:hover .vjs-menu {
     display: none !important; /* Disable Video.js native hover */
 }
 
+/* Bulletproof Positioning: Force menu to sit directly ABOVE the button */
+.video-js.vjs-custom-skin .vjs-menu-button .vjs-menu {
+    position: absolute !important;
+    bottom: 100% !important; /* Push it to the top edge of the button */
+    margin-bottom: 15px !important; /* Add gap between menu and button */
+    left: 50% !important;
+    transform: translateX(-50%) !important; /* Center the menu horizontally over the button */
+    display: none; /* Hidden by default */
+}
+
 /* Show menu only when our custom JS class is applied */
-.video-js.vjs-custom-skin .vjs-menu-button-popup.pontos-menu-open .vjs-menu {
+.video-js.vjs-custom-skin .vjs-menu-button.pontos-menu-open .vjs-menu {
     display: block !important;
 }
 
@@ -592,7 +602,6 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 8px 0;
-    bottom: 50px;
     box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.6);
 }
 
