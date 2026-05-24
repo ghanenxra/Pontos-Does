@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -65,7 +66,16 @@ func getEnv(key, defaultVal string) string {
 }
 
 func loadEnvFile(filename string) error {
-	file, err := os.Open(filename)
+	exePath, err := os.Executable()
+	envPath := filename
+	if err == nil {
+		exeDir := filepath.Dir(exePath)
+		if _, err := os.Stat(filepath.Join(exeDir, filename)); err == nil {
+			envPath = filepath.Join(exeDir, filename)
+		}
+	}
+
+	file, err := os.Open(envPath)
 	if err != nil {
 		return err
 	}
@@ -88,7 +98,7 @@ func loadEnvFile(filename string) error {
 			(strings.HasPrefix(val, "'") && strings.HasSuffix(val, "'")) {
 			val = val[1 : len(val)-1]
 		}
-		if os.Getenv(key) == "" {
+		if _, exists := os.LookupEnv(key); !exists {
 			os.Setenv(key, val)
 		}
 	}

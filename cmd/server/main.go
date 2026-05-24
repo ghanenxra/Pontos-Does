@@ -46,6 +46,22 @@ func main() {
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 
+	// Start background cron to clean up expired sessions
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		ctx := context.Background()
+		for {
+			select {
+			case <-ticker.C:
+				_, err := pool.Exec(ctx, "DELETE FROM sessions WHERE expires_at < CURRENT_TIMESTAMP")
+				if err != nil {
+					log.Printf("Error cleaning up sessions: %v", err)
+				}
+			}
+		}
+	}()
+
 	// Custom logging middleware
 	loggingMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -101,6 +117,11 @@ func runMigrationsIfNeeded(pool *pgxpool.Pool) error {
 	log.Println("Fresh database detected. Applying migrations...")
 
 	migrationPath := filepath.Join("migrations", "000001_init_schema.up.sql")
+	if _, err := os.Stat(migrationPath); os.IsNotExist(err) {
+		exePath, _ := os.Executable()
+		migrationPath = filepath.Join(filepath.Dir(exePath), "migrations", "000001_init_schema.up.sql")
+	}
+
 	migrationBytes, err := os.ReadFile(migrationPath)
 	if err != nil {
 		return fmt.Errorf("unable to read migration up script at %s: %w", migrationPath, err)

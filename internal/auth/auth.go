@@ -265,7 +265,7 @@ func RefreshGoogleTokenIfNeeded(ctx context.Context, db *pgxpool.Pool, cfg *conf
 }
 
 // AuthRequiredMiddleware guards routes that require authentication
-func AuthRequiredMiddleware(db *pgxpool.Pool, next http.HandlerFunc) http.HandlerFunc {
+func AuthRequiredMiddleware(db *pgxpool.Pool, cfg *config.Config, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("session_token")
 		if err != nil {
@@ -279,8 +279,8 @@ func AuthRequiredMiddleware(db *pgxpool.Pool, next http.HandlerFunc) http.Handle
 
 		user, err := GetUserFromSession(r.Context(), db, cookie.Value)
 		if err != nil {
-			// Clear invalid cookie — use false for secure since we don't have config here
-			ClearSessionCookie(w, false)
+			// Clear invalid cookie using config for secure flag
+			ClearSessionCookie(w, cfg.SessionCookieSecure)
 			if r.Header.Get("Accept") == "application/json" || strings.HasPrefix(r.URL.Path, "/api/") {
 				http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
 			} else {

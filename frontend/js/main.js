@@ -1,5 +1,13 @@
 document.addEventListener('DOMContentLoaded', () => {
     // 1. Check user login status to adapt landing links
+    // HTML entity escaper for XSS prevention
+    function escapeHtml(str) {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
     fetch('/api/me')
         .then(res => {
             if (res.ok) {
@@ -10,10 +18,11 @@ document.addEventListener('DOMContentLoaded', () => {
         .then(user => {
             const header = document.querySelector('.landing-header');
             if (header) {
+                const safeAvatar = escapeHtml(user.avatar_url) || 'https://www.gravatar.com/avatar?d=mp';
                 header.innerHTML = `
                     <div style="display: flex; align-items: center; gap: 1.5rem;">
                         <a href="/history" class="nav-link">History</a>
-                        <img src="${user.avatar_url || 'https://www.gravatar.com/avatar?d=mp'}" class="user-avatar" alt="Avatar">
+                        <img src="${safeAvatar}" class="user-avatar" alt="Avatar">
                     </div>
                 `;
             }

@@ -52,10 +52,10 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 		}
 		h.ServePage(w, r, "index.html")
 	})
-	mux.HandleFunc("/player", auth.AuthRequiredMiddleware(h.DB, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/player", auth.AuthRequiredMiddleware(h.DB, h.Config, func(w http.ResponseWriter, r *http.Request) {
 		h.ServePage(w, r, "player.html")
 	}))
-	mux.HandleFunc("/history", auth.AuthRequiredMiddleware(h.DB, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/history", auth.AuthRequiredMiddleware(h.DB, h.Config, func(w http.ResponseWriter, r *http.Request) {
 		h.ServePage(w, r, "history.html")
 	}))
 
@@ -65,17 +65,17 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/auth/logout", h.HandleLogout)
 
 	// API routes (auth required)
-	mux.HandleFunc("/api/config", auth.AuthRequiredMiddleware(h.DB, h.HandleGetConfig))
-	mux.HandleFunc("/api/drive/token", auth.AuthRequiredMiddleware(h.DB, h.HandleDriveToken))
-	mux.HandleFunc("/api/me", auth.AuthRequiredMiddleware(h.DB, h.HandleGetMe))
-	mux.HandleFunc("/api/stream", auth.AuthRequiredMiddleware(h.DB, h.HandleStream))
-	mux.HandleFunc("/api/drive/files", auth.AuthRequiredMiddleware(h.DB, h.HandleDriveFiles))
-	mux.HandleFunc("/api/drive/subtitles", auth.AuthRequiredMiddleware(h.DB, h.HandleDriveSubtitles))
-	mux.HandleFunc("/api/watch/start", auth.AuthRequiredMiddleware(h.DB, h.HandleWatchStart))
-	mux.HandleFunc("/api/watch/ping", auth.AuthRequiredMiddleware(h.DB, h.HandleWatchPing))
-	mux.HandleFunc("/api/watch/end", auth.AuthRequiredMiddleware(h.DB, h.HandleWatchEnd))
-	mux.HandleFunc("/api/video/duration", auth.AuthRequiredMiddleware(h.DB, h.HandleUpdateDuration))
-	mux.HandleFunc("/api/history", auth.AuthRequiredMiddleware(h.DB, h.HandleHistoryRouter))
+	mux.HandleFunc("/api/config", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleGetConfig))
+	mux.HandleFunc("/api/drive/token", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleDriveToken))
+	mux.HandleFunc("/api/me", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleGetMe))
+	mux.HandleFunc("/api/stream", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleStream))
+	mux.HandleFunc("/api/drive/files", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleDriveFiles))
+	mux.HandleFunc("/api/drive/subtitles", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleDriveSubtitles))
+	mux.HandleFunc("/api/watch/start", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleWatchStart))
+	mux.HandleFunc("/api/watch/ping", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleWatchPing))
+	mux.HandleFunc("/api/watch/end", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleWatchEnd))
+	mux.HandleFunc("/api/video/duration", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleUpdateDuration))
+	mux.HandleFunc("/api/history", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleHistoryRouter))
 }
 
 // WriteJSON is a helper to respond with JSON format
@@ -309,14 +309,17 @@ func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media", fileId)
+		targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true", fileId)
 		headers := map[string]string{
 			"Authorization": "Bearer " + tok.AccessToken,
 		}
 
 		err = proxy.StreamProxy(w, r, targetURL, headers)
 		if err != nil {
-			// Proxy logic handles status writing, just log or format
+			// If proxy returned an error without writing to client, write JSON error
+			if !strings.Contains(err.Error(), "error during stream piping") {
+				WriteJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			}
 			return
 		}
 
@@ -351,15 +354,25 @@ func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Validate URL format
+		// Validate URL format and protect against SSRF (Internal IP access)
 		u, err := url.Parse(targetURL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid url"})
 			return
 		}
+		
+		host := u.Hostname()
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" || 
+			strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") || strings.HasPrefix(host, "169.254.") {
+			WriteJSON(w, http.StatusForbidden, map[string]string{"error": "access to internal network is forbidden"})
+			return
+		}
 
 		err = proxy.StreamProxy(w, r, targetURL, nil)
 		if err != nil {
+			if !strings.Contains(err.Error(), "error during stream piping") {
+				WriteJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+			}
 			return
 		}
 
@@ -402,7 +415,7 @@ func (h *Handlers) HandleDriveFiles(w http.ResponseWriter, r *http.Request) {
 
 	// GDrive query API: files in parents and not trashed
 	queryStr := fmt.Sprintf("'%s' in parents and trashed = false and (mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.folder')", folderID)
-	apiURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files?q=%s&fields=files(id,name,mimeType,size,thumbnailLink,videoMediaMetadata)&pageSize=100", url.QueryEscape(queryStr))
+	apiURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files?q=%s&fields=files(id,name,mimeType,size,thumbnailLink,videoMediaMetadata)&pageSize=100&supportsAllDrives=true", url.QueryEscape(queryStr))
 
 	req, err := http.NewRequestWithContext(r.Context(), "GET", apiURL, nil)
 	if err != nil {
@@ -777,15 +790,15 @@ func (h *Handlers) HandleListHistory(w http.ResponseWriter, r *http.Request) {
 
 	sortBy := r.URL.Query().Get("sort_by")
 
-	// Whitelist-based order clause selection — prevents SQL injection
+	// Whitelist-based order clause selection — prevents SQL injection and PostgreSQL group-by errors
 	orderClauses := map[string]string{
-		"last_watched":    "ws.updated_at DESC",
-		"most_watched":    "watch_count DESC, ws.updated_at DESC",
-		"longest_session": "max_session_time DESC, ws.updated_at DESC",
+		"last_watched":    "last_watched DESC",
+		"most_watched":    "watch_count DESC, last_watched DESC",
+		"longest_session": "max_session_time DESC, last_watched DESC",
 	}
 	orderClause, ok := orderClauses[sortBy]
 	if !ok {
-		orderClause = "ws.updated_at DESC" // default
+		orderClause = "last_watched DESC" // default
 	}
 
 	ctx := r.Context()

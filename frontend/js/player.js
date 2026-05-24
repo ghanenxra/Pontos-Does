@@ -120,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let pickerApiLoaded = false;
     let configSettings = null;
 
+    let gapiRetryCount = 0;
     // Load gapi with retry — handles race condition where gapi CDN script hasn't loaded yet
     function initGapi() {
         if (typeof gapi !== 'undefined') {
@@ -132,9 +133,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 .catch(err => {
                     console.warn('Google Cloud configuration endpoint error:', err);
                 });
-        } else {
-            // Retry after a short delay if gapi hasn't loaded yet
+        } else if (gapiRetryCount < 20) {
+            // Retry after a short delay if gapi hasn't loaded yet (max 10 seconds)
+            gapiRetryCount++;
             setTimeout(initGapi, 500);
+        } else {
+            console.error('Google API script failed to load after 10 seconds.');
         }
     }
     initGapi();
@@ -183,7 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         displayFolder(id, name);
                     } else {
                         // User selected the video file directly - plays it immediately
-                        loadVideo('gdrive', id, name, doc[google.picker.Document.THUMBNAIL_URL] || '');
+                        loadVideo('gdrive', id, name, doc[google.picker.Document.THUMBNAIL_URL] || '', '', mimeType);
                     }
                 }
             })
@@ -238,7 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (isFolder) {
                             displayFolder(file.id, file.name);
                         } else {
-                            loadVideo('gdrive', file.id, file.name, file.thumbnailLink, folderId);
+                            loadVideo('gdrive', file.id, file.name, file.thumbnailLink, folderId, file.mimeType);
                         }
                     });
                     
@@ -337,7 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Load URL or File ID into Video.js player, set subtitles and configure tracking session
-    function loadVideo(sourceType, sourceId, title, thumbnail = '', folderId = '') {
+    function loadVideo(sourceType, sourceId, title, thumbnail = '', folderId = '', mimeType = '') {
         // Clear previous progress tracking
         endWatchSession();
 
@@ -345,14 +349,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (videoTitleEl) videoTitleEl.textContent = title;
 
         let srcUrl = '';
-        let type = 'video/mp4';
+        let type = mimeType || 'video/mp4'; // Use provided mimeType or fallback
 
         if (sourceType === 'gdrive') {
             srcUrl = `/api/stream?source=gdrive&fileId=${sourceId}`;
-            type = 'video/mp4';
         } else if (sourceType === 'terabox') {
             srcUrl = `/api/stream?source=terabox&url=${encodeURIComponent(sourceId)}`;
-            type = 'video/mp4';
         } else if (sourceType === 'direct') {
             srcUrl = `/api/stream?source=direct&url=${encodeURIComponent(sourceId)}`;
             type = getStreamType(sourceId); // Auto-detect HLS (.m3u8) vs MP4
@@ -404,30 +406,33 @@ document.addEventListener('DOMContentLoaded', () => {
     // -------------------------------------------------------------
 
     function startWatchSession(sourceType, sourceId, title, thumbnail) {
-        // Query database immediately with initial duration 0
         let duration = 0;
+        let actualDurationDetected = 0;
         
-        // Setup listener to fetch actual duration once metadata resolves,
-        // then PATCH the video record in the database with the real duration
+        // Setup listener to fetch actual duration once metadata resolves
         player.one('loadedmetadata', () => {
-            const actualDuration = Math.floor(player.duration()) || 0;
-            console.log('Video metadata loaded. Duration:', actualDuration);
+            actualDurationDetected = Math.floor(player.duration()) || 0;
+            console.log('Video metadata loaded. Duration:', actualDurationDetected);
 
-            // Update duration in the backend database
-            if (actualDuration > 0 && currentVideoId) {
-                fetch('/api/video/duration', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        video_id: currentVideoId,
-                        duration_seconds: actualDuration
-                    })
-                }).catch(err => console.warn('Duration update failed:', err));
+            // Update duration in the backend database if we already have a videoId
+            if (actualDurationDetected > 0 && currentVideoId) {
+                patchVideoDuration(currentVideoId, actualDurationDetected);
             }
 
             // Autoplay the video after metadata loads
             player.play().catch(() => {});
         });
+
+        function patchVideoDuration(vid, dur) {
+            fetch('/api/video/duration', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    video_id: vid,
+                    duration_seconds: dur
+                })
+            }).catch(err => console.warn('Duration update failed:', err));
+        }
 
         const payload = {
             video_title: title,
@@ -451,6 +456,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (resumePos > 0) {
                 // Seek to resume position
                 player.currentTime(resumePos);
+            }
+
+            // If metadata loaded *before* this fetch returned, patch the duration now
+            if (actualDurationDetected > 0) {
+                patchVideoDuration(currentVideoId, actualDurationDetected);
             }
 
             // Start 10 seconds progress ping interval
@@ -498,17 +508,23 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             // Use sendBeacon for reliable delivery during page unload
-            // Fall back to fetch for normal (non-unload) calls
-            try {
-                const blob = new Blob([payload], { type: 'application/json' });
-                navigator.sendBeacon('/api/watch/end', blob);
-            } catch (e) {
+            // Fall back to fetch if sendBeacon fails to queue
+            const blob = new Blob([payload], { type: 'application/json' });
+            let beaconSent = false;
+            
+            if (typeof navigator.sendBeacon === 'function') {
+                beaconSent = navigator.sendBeacon('/api/watch/end', blob);
+            }
+            
+            if (!beaconSent) {
                 fetch('/api/watch/end', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: payload
+                    body: payload,
+                    keepalive: true
                 }).catch(err => console.warn('End session issue:', err));
             }
+
             
             currentSessionId = null;
         }
