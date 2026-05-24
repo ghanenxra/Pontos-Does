@@ -1,0 +1,14 @@
+# local environment config
+.env
+
+# Go binaries and builds
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+
+# OS-specific files
+.DS_Store
+Thumbs.db

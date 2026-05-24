@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamVault | Watch History</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+    <header class="app-header">
+        <a href="/player" class="brand-title">StreamVault</a>
+        <nav class="nav-links">
+            <a href="/player" class="nav-link">Player</a>
+            <a href="/history" class="nav-link active">History</a>
+            <div class="user-profile" id="user-profile-header">
+                <!-- Injected via JS -->
+                <div class="user-avatar" style="background: #1f1f2e;"></div>
+            </div>
+            <button class="logout-btn" onclick="window.location.href='/auth/logout'">Logout</button>
+        </nav>
+    </header>
+
+    <main class="history-layout">
+        <div class="history-header">
+            <h1 class="history-title">Watch History</h1>
+            
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <label for="sort-select" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">Sort By</label>
+                <select id="sort-select" class="sort-select">
+                    <option value="last_watched" selected>Recently Watched</option>
+                    <option value="most_watched">Most Watched Count</option>
+                    <option value="longest_session">Longest Watch Session</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- History cards grid -->
+        <div class="history-grid" id="history-grid">
+            <!-- Loading State -->
+            <div style="grid-column: 1/-1; padding: 5rem 0; text-align: center; color: var(--text-secondary);">
+                Loading history cards...
+            </div>
+        </div>
+    </main>
+
+    <!-- History Page logic -->
+    <script src="/js/history.js"></script>
+</body>
+</html>
