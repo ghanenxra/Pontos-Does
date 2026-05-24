@@ -105,8 +105,8 @@ func (h *Handlers) HandleDriveToken(w http.ResponseWriter, r *http.Request) {
 // HandleGoogleLogin starts Google OAuth flow
 func (h *Handlers) HandleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 	oauthCfg := auth.GetGoogleOAuthConfig(h.Config)
-	// Force consent and offline access to ensure we get a refresh token
-	url := oauthCfg.AuthCodeURL("state", oauth2.AccessTypeOffline, oauth2.ApprovalForce)
+	// Force consent and offline access to ensure we get a refresh token and grant GDrive scope
+	url := oauthCfg.AuthCodeURL("state", oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 

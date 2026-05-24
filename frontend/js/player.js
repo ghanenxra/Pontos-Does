@@ -25,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.location.href = '/';
         });
 
-    // Initialize Video.js Player
+    // Initialize Video.js Player with speeds and options
     const player = videojs('streamvault-player', {
         fluid: true,
         playbackRates: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2],
@@ -33,6 +33,13 @@ document.addEventListener('DOMContentLoaded', () => {
             pictureInPictureToggle: true,
             volumePanel: { inline: false },
         }
+    });
+
+    // Error Listener for debugging and recruiters
+    player.on('error', () => {
+        const error = player.error();
+        console.error('Video.js Player encountered an error:', error);
+        alert(`Playback Issue: ${error.message} (Code: ${error.code}).\n\nTips:\n- Make sure the stream URL is correct and accessible.\n- Recruiter demo check: Ensure direct URLs are valid .mp4 or .m3u8 streams.\n- MKV files are not supported natively by web browsers.`);
     });
 
     // Custom Quality Selector in Video.js control bar
@@ -45,7 +52,6 @@ document.addEventListener('DOMContentLoaded', () => {
             this.label = options.label;
         },
         handleClick: function() {
-            // Update UI/State
             this.player().trigger('qualitySelected', this.label);
         }
     });
@@ -56,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.controlText('Quality');
         },
         createItems: function() {
-            const qualities = ['Auto (Original)', '1080p', '720p', '485p'];
+            const qualities = ['Auto (Original)', '1080p', '720p', '480p'];
             return qualities.map(q => new QualityMenuItem(this.player(), {
                 label: q,
                 selectable: true,
@@ -75,7 +81,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     player.on('qualitySelected', (e, quality) => {
         console.log('Selected Quality:', quality);
-        // Direct stream or terabox bypasses multiple transcode tracks, show cosmetic alert/log
         videojs.log('Stream quality adjusted to ' + quality);
     });
 
@@ -109,7 +114,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const pickerBtn = document.getElementById('picker-btn');
     pickerBtn.addEventListener('click', () => {
         if (!pickerApiLoaded || !configSettings) {
-            alert('Google Picker API loading. Please retry in a moment.');
+            alert('Google Picker API is still loading. Please retry in a second.');
             return;
         }
 
@@ -123,24 +128,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 openGooglePicker(data.token);
             })
             .catch(err => {
-                alert('Authentication failed: ' + err.message);
+                alert('Google Authentication Issue: ' + err.message + '\n\nMake sure your google account is logged in and credentials in .env are set.');
             });
     });
 
     function openGooglePicker(oauthToken) {
-        const view = new google.picker.View(google.picker.ViewId.FOLDERS);
-        
+        // Allow picking folders AND specific video files (important for drive.file permissions)
+        const docsView = new google.picker.DocsView()
+            .setIncludeFolders(true)
+            .setMimeTypes('application/vnd.google-apps.folder,video/mp4,video/mkv,video/webm,video/quicktime');
+
         const picker = new google.picker.PickerBuilder()
-            .addView(view)
+            .addView(docsView)
             .setOAuthToken(oauthToken)
             .setDeveloperKey(configSettings.developerKey)
             .setCallback((data) => {
                 if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
                     const doc = data[google.picker.Response.DOCUMENTS][0];
-                    const folderId = doc[google.picker.Document.ID];
-                    const folderName = doc[google.picker.Document.NAME];
+                    const id = doc[google.picker.Document.ID];
+                    const name = doc[google.picker.Document.NAME];
+                    const mimeType = doc[google.picker.Document.MIME_TYPE];
                     
-                    displayFolder(folderId, folderName);
+                    if (mimeType === 'application/vnd.google-apps.folder') {
+                        displayFolder(id, name);
+                    } else {
+                        // User selected the video file directly - plays it immediately
+                        loadVideo('gdrive', id, name, doc[google.picker.Document.THUMBNAIL_URL] || '');
+                    }
                 }
             })
             .build();
@@ -213,6 +227,20 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     });
 
+    // Manual Google Drive File ID Loading Input
+    const loadGdriveFileBtn = document.getElementById('load-gdrive-file-btn');
+    loadGdriveFileBtn.addEventListener('click', () => {
+        const fileIdInput = document.getElementById('gdrive-file-id').value.trim();
+        const titleInput = document.getElementById('gdrive-file-title').value.trim();
+
+        if (!fileIdInput || !titleInput) {
+            alert('Please enter both the GDrive File ID and the Video Title.');
+            return;
+        }
+
+        loadVideo('gdrive', fileIdInput, titleInput);
+    });
+
     // Terabox Loading Input
     const loadTeraboxBtn = document.getElementById('load-terabox-btn');
     loadTeraboxBtn.addEventListener('click', () => {
@@ -227,7 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadVideo('terabox', urlInput, titleInput);
     });
 
-    // Direct Stream Loading Input
+    // Direct URL Loading Input
     const loadDirectBtn = document.getElementById('load-direct-btn');
     loadDirectBtn.addEventListener('click', () => {
         const urlInput = document.getElementById('direct-url').value.trim();
@@ -241,6 +269,21 @@ document.addEventListener('DOMContentLoaded', () => {
         loadVideo('direct', urlInput, titleInput);
     });
 
+    // Helper to identify the correct stream MIME type for Video.js (MP4 vs HLS .m3u8)
+    function getStreamType(url) {
+        const lower = url.toLowerCase();
+        if (lower.includes('.m3u8')) {
+            return 'application/x-mpegURL';
+        }
+        if (lower.includes('.webm')) {
+            return 'video/webm';
+        }
+        if (lower.includes('.ogg')) {
+            return 'video/ogg';
+        }
+        return 'video/mp4'; // Default fallback
+    }
+
     // Load URL or File ID into Video.js player, set subtitles and configure tracking session
     function loadVideo(sourceType, sourceId, title, thumbnail = '', folderId = '') {
         // Clear previous progress tracking
@@ -250,22 +293,27 @@ document.addEventListener('DOMContentLoaded', () => {
         videoTitleEl.textContent = title;
 
         let srcUrl = '';
+        let type = 'video/mp4';
+
         if (sourceType === 'gdrive') {
             srcUrl = `/api/stream?source=gdrive&fileId=${sourceId}`;
+            type = 'video/mp4';
         } else if (sourceType === 'terabox') {
             srcUrl = `/api/stream?source=terabox&url=${encodeURIComponent(sourceId)}`;
+            type = 'video/mp4';
         } else if (sourceType === 'direct') {
             srcUrl = `/api/stream?source=direct&url=${encodeURIComponent(sourceId)}`;
+            type = getStreamType(sourceId); // Auto-detect HLS (.m3u8) vs MP4
         }
 
-        // Video.js load source
+        // Set source and reload player engine
         player.src({
             src: srcUrl,
-            type: 'video/mp4' // Fallback typical stream type, works with proxy byte stream
+            type: type
         });
+        player.load();
 
-        // Subtitles configuration (Google Drive folder search)
-        // Clear any old text tracks
+        // Clear and reload subtitles (GDrive folder search)
         const tracks = player.remoteTextTracks();
         let i = tracks.length;
         while (i--) {
@@ -277,7 +325,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 .then(res => res.json())
                 .then(subs => {
                     subs.forEach(sub => {
-                        // Append tracks
                         player.addRemoteTextTrack({
                             kind: 'subtitles',
                             src: `/api/stream?source=gdrive&fileId=${sub.id}`,
@@ -290,7 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 .catch(err => console.log('Error loading subtitles:', err));
         }
 
-        // Start watch session in database
+        // Initialize watch session and pings immediately
         startWatchSession(sourceType, sourceId, title, thumbnail);
     }
 
@@ -299,51 +346,52 @@ document.addEventListener('DOMContentLoaded', () => {
     // -------------------------------------------------------------
 
     function startWatchSession(sourceType, sourceId, title, thumbnail) {
-        // Wait until metadata is loaded to retrieve exact duration
+        // Query database immediately with initial duration 0 (will update on ping/metadata load)
+        let duration = 0;
+        
+        // Setup listener to fetch actual duration once metadata resolves
         player.one('loadedmetadata', () => {
-            const duration = Math.floor(player.duration()) || 0;
-
-            const payload = {
-                video_title: title,
-                source_type: sourceType,
-                source_id: sourceId,
-                thumbnail_url: thumbnail || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&auto=format&fit=crop&q=60',
-                duration_seconds: duration
-            };
-
-            fetch('/api/watch/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            })
-            .then(res => res.json())
-            .then(data => {
-                currentSessionId = data.session_id;
-                currentVideoId = data.video_id;
-                const resumePos = data.last_position_seconds || 0;
-
-                if (resumePos > 0 && resumePos < (duration - 10)) {
-                    const confirmResume = confirm(`Resume playback from last position: ${formatTime(resumePos)}?`);
-                    if (confirmResume) {
-                        player.currentTime(resumePos);
-                    }
-                }
-
-                // Autoplay
-                player.play().catch(() => {});
-
-                // Start 10 seconds progress ping interval
-                startPingInterval();
-            })
-            .catch(err => console.error('Failed to initialize watch session:', err));
+            const actualDuration = Math.floor(player.duration()) || 0;
+            console.log('Video metadata loaded. Duration:', actualDuration);
+            // Autoplay the video after metadata loads
+            player.play().catch(() => {});
         });
+
+        const payload = {
+            video_title: title,
+            source_type: sourceType,
+            source_id: sourceId,
+            thumbnail_url: thumbnail || 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?w=500&auto=format&fit=crop&q=60',
+            duration_seconds: duration
+        };
+
+        fetch('/api/watch/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            currentSessionId = data.session_id;
+            currentVideoId = data.video_id;
+            const resumePos = data.last_position_seconds || 0;
+
+            if (resumePos > 0) {
+                // Seek to resume position
+                player.currentTime(resumePos);
+            }
+
+            // Start 10 seconds progress ping interval
+            startPingInterval();
+        })
+        .catch(err => console.error('Failed to initialize watch session:', err));
     }
 
     function startPingInterval() {
         if (pingIntervalId) clearInterval(pingIntervalId);
 
         pingIntervalId = setInterval(() => {
-            // Only ping if player is currently active
+            // Only ping if player has an active session and is playing
             if (currentSessionId && !player.paused() && !player.ended()) {
                 const pos = Math.floor(player.currentTime());
                 
@@ -372,14 +420,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentSessionId) {
             const pos = Math.floor(player.currentTime());
             
-            // Execute Beacon or standard fetch to register final position
             const payload = JSON.stringify({
                 session_id: currentSessionId,
                 position_seconds: pos
             });
 
-            // If page is closing, use sendBeacon for guarantees
-            navigator.sendBeacon('/api/watch/end', payload);
+            // Make standard end watch call
+            fetch('/api/watch/end', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload
+            }).catch(err => console.warn('End session issue:', err));
             
             currentSessionId = null;
         }
@@ -390,18 +441,6 @@ document.addEventListener('DOMContentLoaded', () => {
     player.on('ended', () => {
         endWatchSession();
     });
-
-    // Helper: format position time
-    function formatTime(secs) {
-        const h = Math.floor(secs / 3600);
-        const m = Math.floor((secs % 3600) / 60);
-        const s = secs % 60;
-        return [
-            h > 0 ? h : null,
-            h > 0 && m < 10 ? '0' + m : m,
-            s < 10 ? '0' + s : s
-        ].filter(x => x !== null).join(':');
-    }
 
     // Check query params if loaded from History Resume trigger
     const urlParams = new URLSearchParams(window.location.search);

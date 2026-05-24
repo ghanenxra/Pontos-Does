@@ -104,6 +104,20 @@
                         No folder selected yet.
                     </div>
                 </div>
+
+                <!-- Direct File ID Load Fallback -->
+                <div style="border-top: 1px solid var(--border-color); padding-top: 1rem; margin-top: 1rem; display: flex; flex-direction: column; gap: 0.75rem;">
+                    <span style="font-size: 0.8rem; color: var(--text-muted); font-weight: 500;">Or load by GDrive File ID directly:</span>
+                    <div class="form-group">
+                        <label class="form-label" for="gdrive-file-id">GDrive File ID</label>
+                        <input class="form-input" type="text" id="gdrive-file-id" placeholder="1abc123XYZ...">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="gdrive-file-title">Video Title</label>
+                        <input class="form-input" type="text" id="gdrive-file-title" placeholder="My GDrive Video">
+                    </div>
+                    <button class="action-btn" id="load-gdrive-file-btn" style="background: #3b82f6; color: white;">Load File</button>
+                </div>
             </div>
 
             <!-- Terabox Tab Content -->
