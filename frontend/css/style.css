@@ -588,6 +588,7 @@ body {
     left: 50% !important;
     transform: translateX(-50%) !important; /* Center the menu horizontally over the button */
     display: none; /* Hidden by default */
+    min-width: 150px; /* Make it wide enough to fit "1.75x" and "Auto (Original)" */
 }
 
 /* Show menu only when our custom JS class is applied */
@@ -603,6 +604,9 @@ body {
     border-radius: 12px;
     padding: 8px 0;
     box-shadow: 0 -5px 25px rgba(0, 0, 0, 0.6);
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: 250px;
 }
 
 .video-js.vjs-custom-skin .vjs-menu-item {
