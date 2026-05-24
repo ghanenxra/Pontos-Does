@@ -52,6 +52,9 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 		}
 		h.ServePage(w, r, "index.html")
 	})
+	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		h.ServePage(w, r, "favicon.svg")
+	})
 	mux.HandleFunc("/player", auth.AuthRequiredMiddleware(h.DB, h.Config, func(w http.ResponseWriter, r *http.Request) {
 		h.ServePage(w, r, "player.html")
 	}))
