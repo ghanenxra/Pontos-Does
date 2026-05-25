@@ -314,9 +314,9 @@ func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true", fileId)
+		targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true&access_token=%s", fileId, url.QueryEscape(tok.AccessToken))
 		headers := map[string]string{
-			"Authorization": "Bearer " + tok.AccessToken,
+			// Token is now passed in URL for FFMPEG reliability
 		}
 
 		audioTrack := r.URL.Query().Get("audioTrack")
@@ -566,13 +566,12 @@ func (h *Handlers) HandleDriveTracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true", fileID)
+	targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true&access_token=%s", fileID, url.QueryEscape(tok.AccessToken))
 
 	cmd := exec.CommandContext(r.Context(), proxy.GetExecutablePath("ffprobe"),
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_streams",
-		"-headers", "Authorization: Bearer "+tok.AccessToken+"\r\n",
 		targetURL)
 
 	out, err := cmd.Output()
