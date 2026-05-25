@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"os/exec"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -74,6 +75,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/stream", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleStream))
 	mux.HandleFunc("/api/drive/files", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleDriveFiles))
 	mux.HandleFunc("/api/drive/subtitles", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleDriveSubtitles))
+	mux.HandleFunc("/api/drive/audiotracks", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleDriveAudioTracks))
 	mux.HandleFunc("/api/watch/start", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleWatchStart))
 	mux.HandleFunc("/api/watch/ping", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleWatchPing))
 	mux.HandleFunc("/api/watch/end", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleWatchEnd))
@@ -317,7 +319,17 @@ func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
 			"Authorization": "Bearer " + tok.AccessToken,
 		}
 
-		err = proxy.StreamProxy(w, r, targetURL, headers)
+		audioTrack := r.URL.Query().Get("audioTrack")
+		isSub := r.URL.Query().Get("isSub") == "true"
+
+		if isSub {
+			err = proxy.SubProxy(w, r, targetURL, headers)
+		} else if audioTrack != "" {
+			err = proxy.AudioRemuxProxy(w, r, targetURL, headers, audioTrack)
+		} else {
+			err = proxy.StreamProxy(w, r, targetURL, headers)
+		}
+
 		if err != nil {
 			// If proxy returned an error without writing to client, write JSON error
 			if !strings.Contains(err.Error(), "error during stream piping") {
@@ -458,14 +470,38 @@ func (h *Handlers) HandleDriveSubtitles(w http.ResponseWriter, r *http.Request) 
 	}
 	user := r.Context().Value(auth.UserContextKey).(*models.User)
 	folderID := r.URL.Query().Get("folderId")
-	if folderID == "" {
-		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "folderId is required"})
+	fileID := r.URL.Query().Get("fileId")
+
+	if folderID == "" && fileID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "folderId or fileId is required"})
 		return
 	}
 
 	tok, err := auth.RefreshGoogleTokenIfNeeded(r.Context(), h.DB, h.Config, user.ID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "oauth failed: " + err.Error()})
+		return
+	}
+
+	if fileID != "" && folderID == "" {
+		parentReqURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?fields=parents", fileID)
+		req, _ := http.NewRequestWithContext(r.Context(), "GET", parentReqURL, nil)
+		req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			var parentData struct {
+				Parents []string `json:"parents"`
+			}
+			json.NewDecoder(resp.Body).Decode(&parentData)
+			resp.Body.Close()
+			if len(parentData.Parents) > 0 {
+				folderID = parentData.Parents[0]
+			}
+		}
+	}
+
+	if folderID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "could not determine folderId"})
 		return
 	}
 
@@ -508,6 +544,76 @@ func (h *Handlers) HandleDriveSubtitles(w http.ResponseWriter, r *http.Request) 
 	}
 
 	WriteJSON(w, http.StatusOK, result.Files)
+}
+
+// HandleDriveAudioTracks uses ffprobe to inspect a Google Drive video stream and return available audio tracks
+func (h *Handlers) HandleDriveAudioTracks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	user := r.Context().Value(auth.UserContextKey).(*models.User)
+	fileID := r.URL.Query().Get("fileId")
+	if fileID == "" {
+		WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "fileId is required"})
+		return
+	}
+
+	tok, err := auth.RefreshGoogleTokenIfNeeded(r.Context(), h.DB, h.Config, user.ID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "oauth failed: " + err.Error()})
+		return
+	}
+
+	targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true", fileID)
+
+	cmd := exec.CommandContext(r.Context(), proxy.GetExecutablePath("ffprobe"),
+		"-v", "quiet",
+		"-print_format", "json",
+		"-show_streams",
+		"-select_streams", "a",
+		"-headers", "Authorization: Bearer "+tok.AccessToken+"\r\n",
+		targetURL)
+
+	out, err := cmd.Output()
+	if err != nil {
+		fmt.Println("ffprobe error or not found:", err)
+		WriteJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+
+	var probeData struct {
+		Streams []struct {
+			Index int `json:"index"`
+			Tags  struct {
+				Language string `json:"language"`
+				Title    string `json:"title"`
+			} `json:"tags"`
+		} `json:"streams"`
+	}
+
+	if err := json.Unmarshal(out, &probeData); err != nil {
+		fmt.Println("failed to parse ffprobe output:", err)
+		WriteJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+
+	type AudioTrack struct {
+		Index    int    `json:"index"`
+		Language string `json:"language"`
+		Title    string `json:"title"`
+	}
+
+	var tracks []AudioTrack
+	for _, stream := range probeData.Streams {
+		tracks = append(tracks, AudioTrack{
+			Index:    stream.Index,
+			Language: stream.Tags.Language,
+			Title:    stream.Tags.Title,
+		})
+	}
+
+	WriteJSON(w, http.StatusOK, tracks)
 }
 
 // HandleUpdateDuration updates the video's duration_seconds after metadata loads on the frontend
