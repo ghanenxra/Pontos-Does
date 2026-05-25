@@ -75,7 +75,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/stream", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleStream))
 	mux.HandleFunc("/api/drive/files", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleDriveFiles))
 	mux.HandleFunc("/api/drive/subtitles", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleDriveSubtitles))
-	mux.HandleFunc("/api/drive/audiotracks", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleDriveAudioTracks))
+	mux.HandleFunc("/api/drive/tracks", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleDriveTracks))
 	mux.HandleFunc("/api/watch/start", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleWatchStart))
 	mux.HandleFunc("/api/watch/ping", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleWatchPing))
 	mux.HandleFunc("/api/watch/end", auth.AuthRequiredMiddleware(h.DB, h.Config, h.HandleWatchEnd))
@@ -320,10 +320,11 @@ func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
 		}
 
 		audioTrack := r.URL.Query().Get("audioTrack")
+		trackIndex := r.URL.Query().Get("trackIndex")
 		isSub := r.URL.Query().Get("isSub") == "true"
 
 		if isSub {
-			err = proxy.SubProxy(w, r, targetURL, headers)
+			err = proxy.SubProxy(w, r, targetURL, headers, trackIndex)
 		} else if audioTrack != "" {
 			err = proxy.AudioRemuxProxy(w, r, targetURL, headers, audioTrack)
 		} else {
@@ -546,8 +547,8 @@ func (h *Handlers) HandleDriveSubtitles(w http.ResponseWriter, r *http.Request) 
 	WriteJSON(w, http.StatusOK, result.Files)
 }
 
-// HandleDriveAudioTracks uses ffprobe to inspect a Google Drive video stream and return available audio tracks
-func (h *Handlers) HandleDriveAudioTracks(w http.ResponseWriter, r *http.Request) {
+// HandleDriveTracks uses ffprobe to inspect a Google Drive video stream and return available audio and subtitle tracks
+func (h *Handlers) HandleDriveTracks(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
@@ -571,21 +572,22 @@ func (h *Handlers) HandleDriveAudioTracks(w http.ResponseWriter, r *http.Request
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_streams",
-		"-select_streams", "a",
 		"-headers", "Authorization: Bearer "+tok.AccessToken+"\r\n",
 		targetURL)
 
 	out, err := cmd.Output()
 	if err != nil {
 		fmt.Println("ffprobe error or not found:", err)
-		WriteJSON(w, http.StatusOK, []interface{}{})
+		WriteJSON(w, http.StatusOK, map[string]interface{}{"audio": []interface{}{}, "subtitles": []interface{}{}})
 		return
 	}
 
 	var probeData struct {
 		Streams []struct {
-			Index int `json:"index"`
-			Tags  struct {
+			Index     int    `json:"index"`
+			CodecType string `json:"codec_type"`
+			CodecName string `json:"codec_name"`
+			Tags      struct {
 				Language string `json:"language"`
 				Title    string `json:"title"`
 			} `json:"tags"`
@@ -594,26 +596,38 @@ func (h *Handlers) HandleDriveAudioTracks(w http.ResponseWriter, r *http.Request
 
 	if err := json.Unmarshal(out, &probeData); err != nil {
 		fmt.Println("failed to parse ffprobe output:", err)
-		WriteJSON(w, http.StatusOK, []interface{}{})
+		WriteJSON(w, http.StatusOK, map[string]interface{}{"audio": []interface{}{}, "subtitles": []interface{}{}})
 		return
 	}
 
-	type AudioTrack struct {
+	type Track struct {
 		Index    int    `json:"index"`
 		Language string `json:"language"`
 		Title    string `json:"title"`
+		Codec    string `json:"codec"`
 	}
 
-	var tracks []AudioTrack
+	audioTracks := []Track{}
+	subtitleTracks := []Track{}
+
 	for _, stream := range probeData.Streams {
-		tracks = append(tracks, AudioTrack{
+		t := Track{
 			Index:    stream.Index,
 			Language: stream.Tags.Language,
 			Title:    stream.Tags.Title,
-		})
+			Codec:    stream.CodecName,
+		}
+		if stream.CodecType == "audio" {
+			audioTracks = append(audioTracks, t)
+		} else if stream.CodecType == "subtitle" {
+			subtitleTracks = append(subtitleTracks, t)
+		}
 	}
 
-	WriteJSON(w, http.StatusOK, tracks)
+	WriteJSON(w, http.StatusOK, map[string]interface{}{
+		"audio":     audioTracks,
+		"subtitles": subtitleTracks,
+	})
 }
 
 // HandleUpdateDuration updates the video's duration_seconds after metadata loads on the frontend

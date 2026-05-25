@@ -184,10 +184,36 @@ func ExtractTeraboxStreamURL(shareURL string) (string, error) {
 	return "", fmt.Errorf("could not find streaming link in Terabox page HTML structure")
 }
 
-// SubProxy fetches a subtitle file (like SRT), converts it to VTT if necessary, and serves it
-func SubProxy(w http.ResponseWriter, r *http.Request, targetURL string, headers map[string]string) error {
+// SubProxy fetches a subtitle file (like SRT), converts it to VTT if necessary, and serves it.
+// If trackIndex is provided, it extracts embedded subtitles directly from the video stream using ffmpeg.
+func SubProxy(w http.ResponseWriter, r *http.Request, targetURL string, headers map[string]string, trackIndex string) error {
 	ctx, cancel := context.WithTimeout(r.Context(), 1*time.Minute)
 	defer cancel()
+
+	if trackIndex != "" {
+		// FFMPEG Embedded Subtitle Extraction
+		args := []string{"-v", "quiet"}
+		if authHeader, ok := headers["Authorization"]; ok {
+			args = append(args, "-headers", "Authorization: "+authHeader+"\r\n")
+		}
+		args = append(args,
+			"-i", targetURL,
+			"-map", fmt.Sprintf("0:%s", trackIndex),
+			"-f", "webvtt",
+			"pipe:1",
+		)
+
+		cmd := exec.CommandContext(ctx, GetExecutablePath("ffmpeg"), args...)
+		w.Header().Set("Content-Type", "text/vtt")
+		w.WriteHeader(http.StatusOK)
+
+		cmd.Stdout = w
+		cmd.Stderr = nil
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("ffmpeg subtitle extraction failed: %w", err)
+		}
+		return nil
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
 	if err != nil {

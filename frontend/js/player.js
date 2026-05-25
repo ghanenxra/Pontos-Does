@@ -43,13 +43,11 @@ document.addEventListener('DOMContentLoaded', () => {
             children: [
                 'playToggle',
                 'volumePanel',
+                'progressControl',
                 'currentTimeDisplay',
                 'durationDisplay',
-                'progressControl',
                 'customControlSpacer',
-                'playbackRateMenuButton',
                 'subsCapsButton',
-                'audioTrackButton',
                 'fullscreenToggle'
             ]
         }
@@ -98,6 +96,42 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     videojs.registerComponent('QualityButton', QualityButton);
+
+    class AudioMenuItem extends MenuItem {
+        constructor(player, options) {
+            super(player, options);
+            this.label_ = options.label;
+            this.index_ = options.index;
+        }
+
+        handleClick() {
+            this.player().trigger('audioSelected', { label: this.label_, index: this.index_ });
+        }
+    }
+
+    class AudioButton extends MenuButton {
+        constructor(player, options) {
+            super(player, options);
+            this.controlText('Audio');
+            this.tracks_ = options.tracks || [];
+        }
+
+        createItems() {
+            if (!this.tracks_ || this.tracks_.length === 0) return [];
+            return this.tracks_.map((t, i) => new AudioMenuItem(this.player(), {
+                label: t.title || t.language || `Track ${i + 1}`,
+                index: t.index,
+                selectable: true,
+                selected: i === 0
+            }));
+        }
+
+        buildCSSClass() {
+            return `vjs-audio-button ${super.buildCSSClass()}`;
+        }
+    }
+
+    videojs.registerComponent('AudioButton', AudioButton);
     player.ready(function() {
         // Insert Quality Button before Fullscreen
         const fsIndex = player.controlBar.children_.findIndex(c => c.name_ === 'FullscreenToggle') || player.controlBar.children_.length - 1;
@@ -427,27 +461,84 @@ document.addEventListener('DOMContentLoaded', () => {
             player.removeRemoteTextTrack(tracks[i]);
         }
 
-        // Load subtitles for GDrive videos — works with folder navigation AND direct pick/resume
+        // Remove old audio button if exists
+        const oldAudioBtn = player.controlBar.getChild('AudioButton');
+        if (oldAudioBtn) {
+            player.controlBar.removeChild(oldAudioBtn);
+            oldAudioBtn.dispose();
+        }
+
+        // Load embedded tracks for GDrive videos (Audio + Subtitles via FFMPEG)
         if (sourceType === 'gdrive') {
-            const subFolderId = folderId || sourceId; // Use folderId if from folder nav, otherwise try video's parent
-            if (folderId) {
-                fetch(`/api/drive/subtitles?folderId=${subFolderId}`)
-                    .then(res => res.json())
-                    .then(subs => {
-                        if (Array.isArray(subs)) {
-                            subs.forEach(sub => {
-                                player.addRemoteTextTrack({
-                                    kind: 'subtitles',
-                                    src: `/api/stream?source=gdrive&fileId=${sub.id}`,
-                                    srclang: 'en',
-                                    label: sub.name,
-                                    default: sub.name.toLowerCase().includes('eng')
-                                }, true);
+            fetch(`/api/drive/tracks?fileId=${sourceId}`)
+                .then(res => res.json())
+                .then(data => {
+                    const audioTracks = data.audio || [];
+                    const subTracks = data.subtitles || [];
+
+                    // 1. Process Embedded Subtitles
+                    if (subTracks.length > 0) {
+                        player.controlBar.subsCapsButton.show();
+                        subTracks.forEach(sub => {
+                            player.addRemoteTextTrack({
+                                kind: 'subtitles',
+                                // trackIndex routes to FFMPEG extraction
+                                src: `/api/stream?source=gdrive&fileId=${sourceId}&isSub=true&trackIndex=${sub.index}`,
+                                srclang: sub.language || 'en',
+                                label: sub.title || `Subtitle ${sub.index}`,
+                                default: sub.language && sub.language.toLowerCase().includes('eng')
+                            }, true);
+                        });
+                    } else {
+                        // Fallback to searching Google Drive for external .srt files in the same folder
+                        fetch(`/api/drive/subtitles?fileId=${sourceId}&folderId=${folderId || ''}`)
+                            .then(res => res.json())
+                            .then(externalSubs => {
+                                if (Array.isArray(externalSubs) && externalSubs.length > 0) {
+                                    player.controlBar.subsCapsButton.show();
+                                    externalSubs.forEach(sub => {
+                                        player.addRemoteTextTrack({
+                                            kind: 'subtitles',
+                                            src: `/api/stream?source=gdrive&fileId=${sub.id}&isSub=true`,
+                                            srclang: 'en',
+                                            label: sub.name,
+                                            default: sub.name.toLowerCase().includes('eng')
+                                        }, true);
+                                    });
+                                } else {
+                                    player.controlBar.subsCapsButton.hide();
+                                }
+                            }).catch(e => player.controlBar.subsCapsButton.hide());
+                    }
+
+                    // 2. Process Audio Tracks
+                    if (audioTracks.length > 1) {
+                        const qualIndex = player.controlBar.children_.findIndex(c => c.name_ === 'QualityButton');
+                        const audioBtn = player.controlBar.addChild('AudioButton', { tracks: audioTracks }, qualIndex > -1 ? qualIndex : player.controlBar.children_.length - 1);
+                        
+                        player.off('audioSelected');
+                        player.on('audioSelected', function(e, track) {
+                            const currentTime = player.currentTime();
+                            const isPaused = player.paused();
+                            
+                            // AudioTrack fallback remux using FFMPEG
+                            const newSrc = `/api/stream?source=gdrive&fileId=${sourceId}&audioTrack=${track.index}`;
+                            player.src({ type: 'video/x-matroska', src: newSrc });
+                            
+                            player.one('loadedmetadata', () => {
+                                player.currentTime(currentTime);
+                                if (!isPaused) player.play();
                             });
-                        }
-                    })
-                    .catch(err => console.log('Error loading subtitles:', err));
-            }
+                            
+                            audioBtn.items.forEach(item => {
+                                item.selected(item.options_.index === track.index);
+                            });
+                        });
+                    }
+                })
+                .catch(err => console.log('Error loading embedded tracks:', err));
+        } else {
+            player.controlBar.subsCapsButton.hide();
         }
 
         // Initialize watch session and pings immediately
