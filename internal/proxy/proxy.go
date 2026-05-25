@@ -234,7 +234,6 @@ func AudioRemuxProxy(w http.ResponseWriter, r *http.Request, targetURL string, h
 	defer cancel()
 
 	// Extract offset if it's a range request - FFMPEG handles seek
-	var offset string
 	if rangeHeader := r.Header.Get("Range"); rangeHeader != "" {
 		// FFMPEG seek for HTTP isn't byte-based easily if we pass URL to FFMPEG.
 		// Actually, if we pass the URL directly to ffmpeg, it will fetch it. 
