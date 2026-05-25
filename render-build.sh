@@ -4,7 +4,7 @@ set -o errexit
 
 # Build the Go server
 echo "Building Go server..."
-go build -o server cmd/server/main.go
+go build -o streamvault cmd/server/main.go
 
 # Download FFMPEG static build if it doesn't exist
 if [ ! -f "ffmpeg" ]; then
