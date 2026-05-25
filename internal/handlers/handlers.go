@@ -880,6 +880,10 @@ func (h *Handlers) HandleWatchEnd(w http.ResponseWriter, r *http.Request) {
 
 // HandleHistoryRouter filters history lists or targets specific items
 func (h *Handlers) HandleHistoryRouter(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodDelete {
+		h.HandleClearHistory(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		WriteJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
@@ -894,6 +898,17 @@ func (h *Handlers) HandleHistoryRouter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.HandleListHistory(w, r)
+}
+
+// HandleClearHistory soft-deletes history for the user from the UI by updating history_cleared_at
+func (h *Handlers) HandleClearHistory(w http.ResponseWriter, r *http.Request) {
+	user := r.Context().Value(auth.UserContextKey).(*models.User)
+	_, err := h.DB.Exec(r.Context(), "UPDATE users SET history_cleared_at = CURRENT_TIMESTAMP WHERE id = $1", user.ID)
+	if err != nil {
+		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to clear history"})
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // HandleListHistory fetches watch sessions sorted and paginated
@@ -948,7 +963,8 @@ func (h *Handlers) HandleListHistory(w http.ResponseWriter, r *http.Request) {
 			) AS last_position
 		FROM videos v
 		JOIN watch_sessions ws ON ws.video_id = v.id
-		WHERE v.user_id = $1
+		JOIN users u ON v.user_id = u.id
+		WHERE v.user_id = $1 AND (u.history_cleared_at IS NULL OR ws.updated_at > u.history_cleared_at)
 		GROUP BY v.id
 		ORDER BY %s
 		LIMIT $2 OFFSET $3

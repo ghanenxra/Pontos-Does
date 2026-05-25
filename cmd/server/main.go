@@ -96,6 +96,12 @@ func runMigrationsIfNeeded(pool *pgxpool.Pool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Ensure users table has history_cleared_at column for soft-deleting history
+	_, err := pool.Exec(ctx, "ALTER TABLE users ADD COLUMN IF NOT EXISTS history_cleared_at TIMESTAMP WITH TIME ZONE;")
+	if err != nil {
+		log.Printf("Failed to auto-migrate history_cleared_at column: %v", err)
+	}
+
 	// Check if users table exists
 	var exists bool
 	checkQuery := `
@@ -104,7 +110,7 @@ func runMigrationsIfNeeded(pool *pgxpool.Pool) error {
 			WHERE table_name = 'users'
 		)
 	`
-	err := pool.QueryRow(ctx, checkQuery).Scan(&exists)
+	err = pool.QueryRow(ctx, checkQuery).Scan(&exists)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("failed to check table existence: %w", err)
 	}

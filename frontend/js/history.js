@@ -41,6 +41,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    const clearHistoryBtn = document.getElementById('clear-history-btn');
+    if (clearHistoryBtn) {
+        clearHistoryBtn.addEventListener('click', () => {
+            if (confirm('Are you sure you want to clear your watch history? This will permanently hide it from your account.')) {
+                fetch('/api/history', { method: 'DELETE' })
+                    .then(res => {
+                        if (!res.ok) throw new Error('Failed to clear history');
+                        loadHistory(sortSelect ? sortSelect.value : 'last_watched');
+                    })
+                    .catch(err => {
+                        alert('Error clearing history: ' + err.message);
+                    });
+            }
+        });
+    }
+
     // Default load
     loadHistory('last_watched');
 

@@ -26,13 +26,19 @@
         <div class="history-header">
             <h1 class="history-title">Watch History</h1>
             
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <label for="sort-select" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">Sort By</label>
-                <select id="sort-select" class="sort-select">
-                    <option value="last_watched" selected>Recently Watched</option>
-                    <option value="most_watched">Most Watched Count</option>
-                    <option value="longest_session">Longest Watch Session</option>
-                </select>
+            <div class="history-controls" style="display: flex; align-items: center; gap: 1rem;">
+                <button id="clear-history-btn" style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); padding: 0.4rem 0.8rem; cursor: pointer; border-radius: 6px; font-weight: 500; display: flex; align-items: center; gap: 6px; font-size: 0.85rem; transition: all 0.2s;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    Clear History
+                </button>
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <label for="sort-select" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">Sort By</label>
+                    <select id="sort-select" class="sort-select">
+                        <option value="last_watched" selected>Recently Watched</option>
+                        <option value="most_watched">Most Watched Count</option>
+                        <option value="longest_session">Longest Watch Session</option>
+                    </select>
+                </div>
             </div>
         </div>
 
@@ -46,6 +52,6 @@
     </main>
 
     <!-- History Page logic -->
-    <script src="/js/history.js"></script>
+    <script src="/js/history.js?v=2"></script>
 </body>
 </html>
