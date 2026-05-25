@@ -44,7 +44,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 'playToggle',
                 'volumePanel',
                 'currentTimeDisplay',
-                'timeDivider',
                 'durationDisplay',
                 'progressControl',
                 'customControlSpacer',

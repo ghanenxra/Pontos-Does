@@ -552,6 +552,14 @@ body {
     align-items: center !important;
 }
 
+/* Fix Volume Slider Alignment Offsets */
+.video-js.vjs-custom-skin .vjs-volume-panel .vjs-slider,
+.video-js.vjs-custom-skin .vjs-volume-bar {
+    margin: 0 !important;
+    top: 0 !important;
+    transform: none !important;
+}
+
 /* Improve button aesthetics and centering */
 .video-js.vjs-custom-skin .vjs-button > .vjs-icon-placeholder:before {
     font-size: 2.2em;
@@ -645,18 +653,20 @@ body {
 }
 
 .video-js.vjs-custom-skin .vjs-time-divider {
-    display: block !important;
-    padding: 0;
-    min-width: 15px;
-    text-align: center;
-    line-height: 40px;
+    display: none !important;
 }
 
 .video-js.vjs-custom-skin .vjs-current-time,
 .video-js.vjs-custom-skin .vjs-duration {
-    display: block !important;
-    line-height: 40px;
+    display: flex !important;
+    align-items: center !important;
     padding: 0 5px;
+}
+
+.video-js.vjs-custom-skin .vjs-current-time .vjs-current-time-display,
+.video-js.vjs-custom-skin .vjs-duration .vjs-duration-display {
+    font-size: 14px !important;
+    line-height: 1 !important;
 }
 
 /* Custom spacer to push items to the right */
