@@ -543,6 +543,13 @@ body {
 
 .video-js.vjs-custom-skin .vjs-volume-panel {
     margin-right: 15px;
+    display: flex !important;
+    align-items: center !important;
+}
+
+.video-js.vjs-custom-skin .vjs-volume-control {
+    display: flex !important;
+    align-items: center !important;
 }
 
 /* Improve button aesthetics and centering */
@@ -643,6 +650,13 @@ body {
     min-width: 15px;
     text-align: center;
     line-height: 40px;
+}
+
+.video-js.vjs-custom-skin .vjs-current-time,
+.video-js.vjs-custom-skin .vjs-duration {
+    display: block !important;
+    line-height: 40px;
+    padding: 0 5px;
 }
 
 /* Custom spacer to push items to the right */
