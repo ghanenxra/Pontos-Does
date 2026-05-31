@@ -473,6 +473,9 @@ document.addEventListener('DOMContentLoaded', () => {
             fetch(`/api/drive/tracks?fileId=${sourceId}`)
                 .then(res => res.json())
                 .then(data => {
+                    if (data._debug_error) {
+                        console.error('FFPROBE DEBUG ERROR:', data._debug_error);
+                    }
                     const audioTracks = data.audio || [];
                     const subTracks = data.subtitles || [];
 

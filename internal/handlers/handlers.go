@@ -583,8 +583,13 @@ func (h *Handlers) HandleDriveTracks(w http.ResponseWriter, r *http.Request) {
 
 	out, err := cmd.Output()
 	if err != nil {
-		fmt.Println("ffprobe error or not found:", err)
-		WriteJSON(w, http.StatusOK, map[string]interface{}{"audio": []interface{}{}, "subtitles": []interface{}{}})
+		var stderrStr string
+		if exitError, ok := err.(*exec.ExitError); ok {
+			stderrStr = string(exitError.Stderr)
+		}
+		errMsg := fmt.Sprintf("ffprobe error or not found: %v, stderr: %s", err, stderrStr)
+		fmt.Println(errMsg)
+		WriteJSON(w, http.StatusOK, map[string]interface{}{"audio": []interface{}{}, "subtitles": []interface{}{}, "_debug_error": errMsg})
 		return
 	}
 
