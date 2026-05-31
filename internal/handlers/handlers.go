@@ -314,9 +314,11 @@ func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true&access_token=%s", fileId, url.QueryEscape(tok.AccessToken))
+		targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true", fileId)
+		targetURLForFFMPEG := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true&access_token=%s", fileId, url.QueryEscape(tok.AccessToken))
+		
 		headers := map[string]string{
-			// Token is now passed in URL for FFMPEG reliability
+			"Authorization": "Bearer " + tok.AccessToken,
 		}
 
 		audioTrack := r.URL.Query().Get("audioTrack")
@@ -324,9 +326,13 @@ func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
 		isSub := r.URL.Query().Get("isSub") == "true"
 
 		if isSub {
-			err = proxy.SubProxy(w, r, targetURL, headers, trackIndex)
+			if trackIndex != "" {
+				err = proxy.SubProxy(w, r, targetURLForFFMPEG, headers, trackIndex)
+			} else {
+				err = proxy.SubProxy(w, r, targetURL, headers, trackIndex)
+			}
 		} else if audioTrack != "" {
-			err = proxy.AudioRemuxProxy(w, r, targetURL, headers, audioTrack)
+			err = proxy.AudioRemuxProxy(w, r, targetURLForFFMPEG, headers, audioTrack)
 		} else {
 			err = proxy.StreamProxy(w, r, targetURL, headers)
 		}
