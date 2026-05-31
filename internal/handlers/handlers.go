@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -315,7 +316,6 @@ func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
 		}
 
 		targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true", fileId)
-		targetURLForFFMPEG := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true&access_token=%s", fileId, url.QueryEscape(tok.AccessToken))
 		
 		headers := map[string]string{
 			"Authorization": "Bearer " + tok.AccessToken,
@@ -324,16 +324,28 @@ func (h *Handlers) HandleStream(w http.ResponseWriter, r *http.Request) {
 		audioTrack := r.URL.Query().Get("audioTrack")
 		trackIndex := r.URL.Query().Get("trackIndex")
 		isSub := r.URL.Query().Get("isSub") == "true"
+		internalReq := r.URL.Query().Get("internal") == "true"
 
-		if isSub {
-			if trackIndex != "" {
-				err = proxy.SubProxy(w, r, targetURLForFFMPEG, headers, trackIndex)
-			} else {
-				err = proxy.SubProxy(w, r, targetURL, headers, trackIndex)
+		if (isSub || audioTrack != "") && !internalReq {
+			port := os.Getenv("PORT")
+			if port == "" {
+				port = "8080"
 			}
-		} else if audioTrack != "" {
-			err = proxy.AudioRemuxProxy(w, r, targetURLForFFMPEG, headers, audioTrack)
+			localURL := fmt.Sprintf("http://127.0.0.1:%s/api/stream?source=gdrive&fileId=%s&internal=true", port, fileId)
+			
+			// Build headers for ffmpeg to authenticate to localhost server
+			ffmpegHeaders := map[string]string{}
+			if sessionCookie, err := r.Cookie("session_token"); err == nil {
+				ffmpegHeaders["Authorization"] = "Bearer " + sessionCookie.Value
+			}
+			
+			if isSub {
+				err = proxy.SubProxy(w, r, localURL, ffmpegHeaders, trackIndex)
+			} else {
+				err = proxy.AudioRemuxProxy(w, r, localURL, ffmpegHeaders, audioTrack)
+			}
 		} else {
+			// Raw stream bypassing FFMPEG
 			err = proxy.StreamProxy(w, r, targetURL, headers)
 		}
 
@@ -566,20 +578,29 @@ func (h *Handlers) HandleDriveTracks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tok, err := auth.RefreshGoogleTokenIfNeeded(r.Context(), h.DB, h.Config, user.ID)
+	// Token refresh is not strictly needed here since localhost proxy will handle it, but we can verify it's valid
+	_, err := auth.RefreshGoogleTokenIfNeeded(r.Context(), h.DB, h.Config, user.ID)
 	if err != nil {
 		WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "oauth failed: " + err.Error()})
 		return
 	}
 
-	targetURL := fmt.Sprintf("https://www.googleapis.com/drive/v3/files/%s?alt=media&supportsAllDrives=true&access_token=%s", fileID, url.QueryEscape(tok.AccessToken))
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	localURL := fmt.Sprintf("http://127.0.0.1:%s/api/stream?source=gdrive&fileId=%s", port, fileID)
 
 	cmd := exec.CommandContext(r.Context(), proxy.GetExecutablePath("ffprobe"),
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_streams",
-		"-user_agent", proxy.UserAgent,
-		targetURL)
+		"-user_agent", proxy.UserAgent)
+
+	if sessionCookie, err := r.Cookie("session_token"); err == nil {
+		cmd.Args = append(cmd.Args, "-headers", fmt.Sprintf("Cookie: session_token=%s\r\n", sessionCookie.Value))
+	}
+	cmd.Args = append(cmd.Args, localURL)
 
 	out, err := cmd.Output()
 	if err != nil {
