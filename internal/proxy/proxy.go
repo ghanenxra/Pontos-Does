@@ -281,7 +281,7 @@ func AudioRemuxProxy(w http.ResponseWriter, r *http.Request, targetURL string, h
 	args = append(args,
 		"-i", targetURL,
 		"-map", "0:v:0", // default video
-		"-map", fmt.Sprintf("0:a:%s", audioTrack), // selected audio
+		"-map", fmt.Sprintf("0:%s", audioTrack), // selected audio using absolute index
 		"-c", "copy",
 		"-f", "mp4",
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof", // fragmented MP4 for live HTTP streaming

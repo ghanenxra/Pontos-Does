@@ -515,7 +515,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     // 2. Process Audio Tracks
-                    if (audioTracks.length > 1) {
+                    if (audioTracks.length > 0) {
                         const qualIndex = player.controlBar.children_.findIndex(c => c.name_ === 'QualityButton');
                         const audioBtn = player.controlBar.addChild('AudioButton', { tracks: audioTracks }, qualIndex > -1 ? qualIndex : player.controlBar.children_.length - 1);
                         
