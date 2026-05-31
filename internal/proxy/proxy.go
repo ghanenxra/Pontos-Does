@@ -192,7 +192,7 @@ func SubProxy(w http.ResponseWriter, r *http.Request, targetURL string, headers 
 
 	if trackIndex != "" {
 		// FFMPEG Embedded Subtitle Extraction
-		args := []string{"-v", "quiet"}
+		args := []string{"-v", "quiet", "-user_agent", UserAgent}
 		if authHeader, ok := headers["Authorization"]; ok {
 			args = append(args, "-headers", "Authorization: "+authHeader+"\r\n")
 		}
@@ -270,6 +270,7 @@ func AudioRemuxProxy(w http.ResponseWriter, r *http.Request, targetURL string, h
 	// FFMPEG args
 	args := []string{
 		"-v", "quiet",
+		"-user_agent", UserAgent,
 	}
 
 	// Add auth headers for input

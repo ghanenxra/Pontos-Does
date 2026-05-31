@@ -13,6 +13,7 @@ if [ ! -f "ffmpeg" ]; then
     tar -xf ffmpeg-release-amd64-static.tar.xz
     mv ffmpeg-*-amd64-static/ffmpeg .
     mv ffmpeg-*-amd64-static/ffprobe .
+    chmod +x ffmpeg ffprobe
     rm -rf ffmpeg-release-amd64-static.tar.xz ffmpeg-*-amd64-static
     echo "FFMPEG downloaded successfully!"
 fi

@@ -578,6 +578,7 @@ func (h *Handlers) HandleDriveTracks(w http.ResponseWriter, r *http.Request) {
 		"-v", "quiet",
 		"-print_format", "json",
 		"-show_streams",
+		"-user_agent", proxy.UserAgent,
 		targetURL)
 
 	out, err := cmd.Output()
