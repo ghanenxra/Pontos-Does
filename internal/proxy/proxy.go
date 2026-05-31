@@ -282,13 +282,14 @@ func AudioRemuxProxy(w http.ResponseWriter, r *http.Request, targetURL string, h
 		"-map", "0:v:0", // default video
 		"-map", fmt.Sprintf("0:a:%s", audioTrack), // selected audio
 		"-c", "copy",
-		"-f", "matroska", // matroska is streamable and supports any codec
+		"-f", "mp4",
+		"-movflags", "frag_keyframe+empty_moov+default_base_moof", // fragmented MP4 for live HTTP streaming
 		"pipe:1",
 	)
 
 	cmd := exec.CommandContext(ctx, GetExecutablePath("ffmpeg"), args...)
 
-	w.Header().Set("Content-Type", "video/x-matroska")
+	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Accept-Ranges", "none") // disable seeking for live FFMPEG remux for now
 	w.WriteHeader(http.StatusOK)
 
